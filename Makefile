@@ -1,26 +1,32 @@
-LIB_FILES=__init__.py device.py iscsi.py losetup.py tapdisk.py dmsetup.py nbdclient.py nbdtool.py image.py
+LIB_FILES=__init__.py device.py iscsi.py losetup.py tapdisk.py dmsetup.py nbdclient.py nbdtool.py image.py libvhd.py poolhelper.py
 
 .PHONY: clean
 clean:
 
 DESTDIR?=/
 SCRIPTDIR?=/usr/libexec/xapi-storage-script
-PYTHONDIR?=/usr/lib/python2.7/site-packages/xapi/storage/datapath
+PYTHONDIR?=/usr/lib/python2.7/site-packages/xapi/storage/lib
 
 
 install:
 	mkdir -p $(DESTDIR)$(SCRIPTDIR)/datapath/loop+blkback
-	(cd src/loop+blkback; install -m 0755 plugin.py datapath.py $(DESTDIR)$(SCRIPTDIR)/datapath/loop+blkback)
+	(cd datapath/loop+blkback; install -m 0755 plugin.py datapath.py $(DESTDIR)$(SCRIPTDIR)/datapath/loop+blkback)
 	(cd $(DESTDIR)$(SCRIPTDIR)/datapath/loop+blkback; for link in Datapath.attach Datapath.activate Datapath.deactivate Datapath.detach; do ln -s datapath.py $$link; done)
 	(cd $(DESTDIR)$(SCRIPTDIR)/datapath/loop+blkback; for link in Plugin.Query; do ln -s plugin.py $$link; done)
 	mkdir -p $(DESTDIR)$(SCRIPTDIR)/datapath/tapdisk
-	(cd src/tapdisk; install -m 0755 plugin.py datapath.py $(DESTDIR)$(SCRIPTDIR)/datapath/tapdisk)
+	(cd datapath/tapdisk; install -m 0755 plugin.py datapath.py $(DESTDIR)$(SCRIPTDIR)/datapath/tapdisk)
 	(cd $(DESTDIR)$(SCRIPTDIR)/datapath/tapdisk; for link in Datapath.open Datapath.attach Datapath.activate Datapath.deactivate Datapath.detach Datapath.close; do ln -s datapath.py $$link; done)
 	(cd $(DESTDIR)$(SCRIPTDIR)/datapath/tapdisk; for link in Plugin.Query; do ln -s plugin.py $$link; done)
 	mkdir -p $(DESTDIR)$(SCRIPTDIR)/datapath/raw+block
-	(cd src/raw+block; install -m 0755 plugin.py datapath.py $(DESTDIR)$(SCRIPTDIR)/datapath/raw+block)
+	(cd datapath/raw+block; install -m 0755 plugin.py datapath.py $(DESTDIR)$(SCRIPTDIR)/datapath/raw+block)
 	(cd $(DESTDIR)$(SCRIPTDIR)/datapath/raw+block; for link in Datapath.attach Datapath.activate Datapath.deactivate Datapath.detach; do ln -s datapath.py $$link; done)
 	(cd $(DESTDIR)$(SCRIPTDIR)/datapath/raw+block; for link in Plugin.Query; do ln -s plugin.py $$link; done)
 	(cd $(DESTDIR)$(SCRIPTDIR)/datapath ; ln -snf tapdisk raw+file ; ln -snf tapdisk vhd+file)
+	mkdir -p $(DESTDIR)$(SCRIPTDIR)/volume/org.xen.xapi.storage.gfs2
+	(cd volume/org.xen.xapi.storage.gfs2; install -m 0755 plugin.py sr.py volume.py $(DESTDIR)$(SCRIPTDIR)/volume/org.xen.xapi.storage.gfs2)
+	(cd $(DESTDIR)$(SCRIPTDIR)/volume/org.xen.xapi.storage.gfs2; for link in Plugin.diagnostics Plugin.Query; do ln -s plugin.py $$link; done)
+	(cd $(DESTDIR)$(SCRIPTDIR)/volume/org.xen.xapi.storage.gfs2; for link in Volume.destroy Volume.set_description Volume.stat Volume.clone Volume.resize Volume.set_name Volume.unset Volume.create Volume.set Volume.snapshot; do ln -s volume.py $$link; done)
+	(cd $(DESTDIR)$(SCRIPTDIR)/volume/org.xen.xapi.storage.gfs2; for link in SR.destroy SR.stat SR.attach SR.detach SR.create SR.ls ; do ln -s sr.py $$link; done)
+	(cd $(DESTDIR)$(SCRIPTDIR)/datapath/tapdisk; for link in Plugin.Query; do ln -s plugin.py $$link; done)
 	mkdir -p $(DESTDIR)$(PYTHONDIR)
-	(cd datapath; install -m 0755 $(LIB_FILES) $(DESTDIR)$(PYTHONDIR)/)
+	(cd lib; install -m 0755 $(LIB_FILES) $(DESTDIR)$(PYTHONDIR)/)
