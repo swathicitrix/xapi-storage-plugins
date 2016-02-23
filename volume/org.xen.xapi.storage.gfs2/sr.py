@@ -66,7 +66,9 @@ class Implementation(xapi.storage.api.volume.SR_skeleton):
         return
 
     def ls(self, dbg, sr):
-        return None
+        import volume
+        import libvhd
+        return libvhd.ls(dbg, sr, volume.gfs2BaseCallbacks())
 
     def stat(self, dbg, sr):
         # Get the filesystem size

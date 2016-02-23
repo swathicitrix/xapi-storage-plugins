@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 import urlparse
+import errno
 import os
 import sys
 import xapi.storage.api.volume
@@ -17,8 +18,22 @@ class gfs2BaseCallbacks():
     def volumeDestroy(self, opq, name):
         vol_dir = os.path.join(opq, name)
         vol_path = os.path.join(vol_dir, name)
-        os.unlink(vol_path)
-        os.rmdir(vol_dir)
+        try:
+            os.unlink(vol_path)
+        except OSError as exc:
+            if exc.errno == errno.ENOENT:
+                pass
+            else:
+                raise
+        try:
+            os.rmdir(vol_dir)
+        except OSError as exc:
+            if exc.errno == errno.ENOENT:
+                pass
+            else:
+                raise
+    def volumeGetPath(self, opq, name):
+        return os.path.join(opq, name, name)
     def volumeActivateLocal(self, opq, name):
         pass
     def volumeDeactivateLocal(self, opq, name):
@@ -28,6 +43,7 @@ class gfs2BaseCallbacks():
                   os.path.join(opq, new_name))
         os.rename(os.path.join(opq, new_name, old_name),
                   os.path.join(opq, new_name, new_name))
+        return os.path.join(opq, new_name, new_name)
     def volumeResize(self, opq, name, new_size):
         pass
     def volumeGetPhysSize(self, opq, name):
@@ -38,7 +54,7 @@ class gfs2BaseCallbacks():
         return opq
     def volumeStopOperations(self, opq):
         pass
-    def volumeMetadataGetPath(self, opq, name):
+    def volumeMetadataGetPath(self, opq):
         return os.path.join(opq, "meta")
         
 
@@ -48,7 +64,7 @@ class Implementation(xapi.storage.api.volume.Volume_skeleton):
         return libvhd.clone(dbg, sr, key, gfs2BaseCallbacks())
 
     def snapshot(self, dbg, sr, key):
-        return libvhd.snapshot(dbg, sr, key, gfs2BaseCallbacks())
+        return libvhd.clone(dbg, sr, key, gfs2BaseCallbacks())
 
     def create(self, dbg, sr, name, description, size):
         return libvhd.create(dbg, sr, name, description, size, 

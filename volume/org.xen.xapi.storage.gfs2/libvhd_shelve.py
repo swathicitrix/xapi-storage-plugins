@@ -1,12 +1,19 @@
 #!/usr/bin/env python
 
 import uuid
-import sqlite3
+import shelve
 import os
 from xapi.storage.common import call
 
 
 def create(dbg, sr, name, description, size, cb):
+
+    vol_name = str(uuid.uuid4()) + ".vhd"
+
+    opq = cb.volumeStartOperations(sr, 'w')
+
+    vol_path = cb.volumeCreate(opq, vol_name, size)
+    cb.volumeActivateLocal(opq, vol_name)
 
     # Calculate virtual size (round up size to nearest MiB)
     size = int(size)
@@ -14,17 +21,6 @@ def create(dbg, sr, name, description, size, cb):
     if size % 1048576 != 0:
         size_mib = size_mib + 1
     vsize = size_mib * 1048576
-
-    opq = cb.volumeStartOperations(sr, 'w')
-    meta_path = cb.volumeMetadataGetPath(opq)
-
-    conn = sqlite3.connect(meta_path)
-    res = conn.execute("insert into VOLUMES(snap, name, description) values (?, ?, ?)", 
-                       (0, name, description))
-    vol_name = res.lastrowid
-
-    vol_path = cb.volumeCreate(opq, vol_name, size)
-    cb.volumeActivateLocal(opq, vol_name)
 
     # Create the VHD
     cmd = ["/usr/bin/vhd-util", "create", "-n", vol_path,
@@ -37,11 +33,22 @@ def create(dbg, sr, name, description, size, cb):
     psize = cb.volumeGetPhysSize(opq, vol_name)
 
     # Save metadata
+    meta_path = cb.volumeMetadataGetPath(opq)
 
     cb.volumeStopOperations(opq)
 
-    conn.commit()
-    conn.close()
+    d = shelve.open(meta_path)
+    meta = {
+        "name": name,
+        "description": description,
+        "vsize": vsize,
+        "keys": {},
+        "childrens": [],
+        "parent": "None"
+    }   
+
+    d[vol_name] = meta
+    d.close()
 
     return {
         "key": vol_name,
@@ -59,11 +66,9 @@ def destroy(dbg, sr, name, cb):
     opq = cb.volumeStartOperations(sr, 'w')
     cb.volumeDestroy(opq, name)
     meta_path = cb.volumeMetadataGetPath(opq)
-
-    conn = sqlite3.connect(meta_path)
-    res = conn.execute("delete from VOLUMES where rowid = (?)", (int(name),))
-    conn.commit()
-    conn.close()
+    d = shelve.open(meta_path)
+    del d[str(name)]
+    d.close()
 
 def clone(dbg, sr, key, cb):
     snap_name = str(uuid.uuid4()) + ".vhd"
