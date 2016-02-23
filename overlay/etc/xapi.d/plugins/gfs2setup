@@ -1,0 +1,143 @@
+#!/usr/bin/python
+#
+# Copyright (C) Citrix Systems Inc.
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU Lesser General Public License as published
+# by the Free Software Foundation; version 2.1 only.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU Lesser General Public License for more details.
+#
+# You should have received a copy of the GNU Lesser General Public License
+# along with this program; if not, write to the Free Software Foundation, Inc.,
+# 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+#
+# Setup corosync and dlm for GFS2
+# TODO: Some try/except/raise wouldn't hurt
+
+import os
+import fcntl
+import subprocess
+import XenAPIPlugin
+
+
+class gfs2PluginLock():
+    _path = "/var/run/gfs2PluginLock.lock"
+
+    def __init__(self):
+        self._fd = None
+
+    def __enter__(self):
+        self._fd = os.open(self._path, os.O_WRONLY | os.O_CREAT, 0600)
+        fcntl.flock(self._fd, fcntl.LOCK_EX)
+        os.write(self._fd, str(os.getpid()))
+
+    def __exit__(self, type, value, traceback):
+        os.ftruncate(self._fd, 0)
+        fcntl.flock(self._fd, fcntl.LOCK_UN)
+        os.close(self._fd)
+        self._fd = None
+
+
+def call(cmd_args):
+    p = subprocess.Popen(
+        cmd_args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    stdout, stderr = p.communicate()
+    return stdout.rstrip()
+
+
+def testCorosync():
+    out = call(["/usr/bin/systemctl", "is-active", "dlm"])
+    if out == "active":
+        return True
+    return False
+
+
+def setupCorosync(session, pool_uuid):
+    call(["/usr/sbin/modprobe", "gfs2"])
+    call(["/usr/sbin/modprobe", "configfs"])
+
+    sysconfigdlm = open("/etc/sysconfig/dlm", "w")
+    sysconfigdlm.write("DLM_CONTROLD_OPTS=\"--enable_fencing=0 --enable_quorum_fencing=0 -K\"")
+    coroconf.close()
+
+    call(["/usr/sbin/modprobe", "dlm"])
+
+    conf = """totem {
+  version: 2
+  secauth: off
+  cluster_name: %s
+  transport: udpu
+  token_retransmits_before_loss_const: 10
+  token: 10000
+}
+
+logging {
+  debug: on
+}
+
+quorum {
+  provider: corosync_votequorum
+}
+
+nodelist {""" % pool_uuid
+
+    for host in session.xenapi.host.get_all():
+        conf += """
+  node {
+    ring0_addr: %s
+  }""" % session.xenapi.host.get_address(host)
+
+    conf += """
+}
+"""
+
+    coroconf = open("/etc/corosync/corosync.conf", "w")
+    coroconf.write(conf)
+    coroconf.close()
+
+    if call(["/usr/bin/systemctl", "is-enabled", "corosync"]) != "enabled":
+        call(["/usr/bin/systemctl", "enable", "corosync"])
+    if call(["/usr/bin/systemctl", "is-active", "corosync"]) != "active":
+        call(["/usr/bin/systemctl", "start", "corosync"])
+    else:
+        call(["/usr/sbin/corosync-cfgtool", "-R"])
+    if call(["/usr/bin/systemctl", "is-enabled", "dlm"]) != "enabled":
+        call(["/usr/bin/systemctl", "enable", "dlm"])
+    if call(["/usr/bin/systemctl", "is-active", "dlm"]) != "active":
+        call(["/usr/bin/systemctl", "start", "dlm"])
+
+    return True
+
+
+def gfs2Setup(session, args):
+    pool = session.xenapi.pool.get_all()[0]
+    pool_uuid = session.xenapi.pool.get_uuid(pool)
+    cluster_name = pool_uuid[:8]
+
+    with gfs2PluginLock():
+        if testCorosync() or setupCorosync(session, cluster_name):
+            return str(cluster_name)
+
+    return ""
+
+
+def gfs2Reload(session, args):
+    pool = session.xenapi.pool.get_all()[0]
+    pool_uuid = session.xenapi.pool.get_uuid(pool)
+    cluster_name = pool_uuid[:8]
+
+    with gfs2PluginLock():
+        if setupCorosync(session, cluster_name):
+            return str(cluster_name)
+
+    return ""
+
+
+if __name__ == "__main__":
+    XenAPIPlugin.dispatch({
+        "gfs2Setup": gfs2Setup,
+        "gfs2Reload": gfs2Reload})
