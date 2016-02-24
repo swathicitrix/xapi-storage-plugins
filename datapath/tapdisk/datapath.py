@@ -6,7 +6,7 @@ import sys
 import xapi
 import xapi.storage.api.datapath
 import xapi.storage.api.volume
-from xapi.storage.datapath import tapdisk, image
+from xapi.storage.libs import tapdisk, image
 from xapi.storage import log
 import pickle
 

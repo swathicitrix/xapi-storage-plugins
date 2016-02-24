@@ -4,9 +4,9 @@ import urlparse
 import os
 import sys
 import xapi
-import xapi.storage.datapath
+import xapi.storage.libs
 import xapi.storage.api.datapath
-from xapi.storage.datapath import losetup, dmsetup
+from xapi.storage.libs import losetup, dmsetup
 from xapi.storage import log
 
 

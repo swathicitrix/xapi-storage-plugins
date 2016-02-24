@@ -1,4 +1,4 @@
-COMMON_FILES=__init__.py device.py iscsi.py losetup.py tapdisk.py dmsetup.py nbdclient.py nbdtool.py image.py libvhd.py poolhelper.py
+LIBS_FILES=__init__.py device.py iscsi.py losetup.py tapdisk.py dmsetup.py nbdclient.py nbdtool.py image.py libvhd.py poolhelper.py
 PLUGINS=suspend-resume-datapath gfs2setup
 
 .PHONY: clean
@@ -6,7 +6,7 @@ clean:
 
 DESTDIR?=/
 SCRIPTDIR?=/usr/libexec/xapi-storage-script
-PYTHONDIR?=/usr/lib/python2.7/site-packages/xapi/storage/common
+PYTHONDIR?=/usr/lib/python2.7/site-packages/xapi/storage/libs
 PLUGINSDIR?=/etc/xapi.d/plugins
 
 install:
@@ -34,6 +34,6 @@ install:
 	(cd $(DESTDIR)$(SCRIPTDIR)/volume/org.xen.xapi.storage.lvm2; for link in Volume.destroy Volume.set_description Volume.stat Volume.clone Volume.resize Volume.set_name Volume.unset Volume.create Volume.set Volume.snapshot; do ln -s volume.py $$link; done)
 	(cd $(DESTDIR)$(SCRIPTDIR)/volume/org.xen.xapi.storage.lvm2; for link in SR.destroy SR.stat SR.attach SR.detach SR.create SR.ls ; do ln -s sr.py $$link; done)
 	mkdir -p $(DESTDIR)$(PYTHONDIR)
-	(cd common; install -m 0755 $(COMMON_FILES) $(DESTDIR)$(PYTHONDIR)/)
+	(cd libs; install -m 0755 $(LIBS_FILES) $(DESTDIR)$(PYTHONDIR)/)
 	mkdir -p $(DESTDIR)$(PLUGINSDIR)
 	(cd overlay/etc/xapi.d/plugins; install -m 0755 $(PLUGINS) $(DESTDIR)$(PLUGINSDIR)/)
