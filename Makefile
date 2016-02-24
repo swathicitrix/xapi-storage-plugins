@@ -28,6 +28,11 @@ install:
 	(cd $(DESTDIR)$(SCRIPTDIR)/volume/org.xen.xapi.storage.gfs2; for link in Plugin.diagnostics Plugin.Query; do ln -s plugin.py $$link; done)
 	(cd $(DESTDIR)$(SCRIPTDIR)/volume/org.xen.xapi.storage.gfs2; for link in Volume.destroy Volume.set_description Volume.stat Volume.clone Volume.resize Volume.set_name Volume.unset Volume.create Volume.set Volume.snapshot; do ln -s volume.py $$link; done)
 	(cd $(DESTDIR)$(SCRIPTDIR)/volume/org.xen.xapi.storage.gfs2; for link in SR.destroy SR.stat SR.attach SR.detach SR.create SR.ls ; do ln -s sr.py $$link; done)
+	mkdir -p $(DESTDIR)$(SCRIPTDIR)/volume/org.xen.xapi.storage.lvm
+	(cd volume/org.xen.xapi.storage.lvm; install -m 0755 plugin.py sr.py volume.py $(DESTDIR)$(SCRIPTDIR)/volume/org.xen.xapi.storage.lvm)
+	(cd $(DESTDIR)$(SCRIPTDIR)/volume/org.xen.xapi.storage.lvm; for link in Plugin.diagnostics Plugin.Query; do ln -s plugin.py $$link; done)
+	(cd $(DESTDIR)$(SCRIPTDIR)/volume/org.xen.xapi.storage.lvm; for link in Volume.destroy Volume.set_description Volume.stat Volume.clone Volume.resize Volume.set_name Volume.unset Volume.create Volume.set Volume.snapshot; do ln -s volume.py $$link; done)
+	(cd $(DESTDIR)$(SCRIPTDIR)/volume/org.xen.xapi.storage.lvm; for link in SR.destroy SR.stat SR.attach SR.detach SR.create SR.ls ; do ln -s sr.py $$link; done)
 	mkdir -p $(DESTDIR)$(PYTHONDIR)
 	(cd common; install -m 0755 $(COMMON_FILES) $(DESTDIR)$(PYTHONDIR)/)
 	mkdir -p $(DESTDIR)$(PLUGINSDIR)
