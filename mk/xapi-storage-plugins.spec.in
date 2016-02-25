@@ -1,0 +1,50 @@
+Name:           xapi-storage-plugins
+Version:        @XAPI_STORAGE_PLUGINS_VERSION@
+Release:        @XAPI_STORAGE_PLUGINS_RELEASE@
+Summary:        Storage plugins for the xapi toolstack
+License:        LGPL
+URL:            https://github.com/xapi-project/xapi-storage-plugins
+Source0:        https://github.com/xapi-project/%{name}/archive/v%{version}/%{name}-%{version}.tar.bz2
+Requires:       xapi-storage
+Requires:       corosync
+Requires:       corosynclib
+Requires:       dlm
+Requires:       dlm-lib
+Requires:       gfs2-utils
+
+%description
+Storage plugins for the xapi toolstack.
+
+%prep
+%setup -q
+
+%build
+
+%install
+DESTDIR=%{buildroot} SCRIPTDIR=%{_libexecdir}/xapi-storage-script/ PYTHONDIR=/usr/lib/python2.7/site-packages/xapi/storage/libs PLUGINSDIR=%{_sysconfdir}/xapi.d/plugins make install
+
+%files
+%doc README.md LICENSE
+%{_libexecdir}/xapi-storage-script/datapath/raw+file
+%{_libexecdir}/xapi-storage-script/datapath/vhd+file
+%{_libexecdir}/xapi-storage-script/datapath/loop+blkback/*
+%{_libexecdir}/xapi-storage-script/datapath/tapdisk/*
+%{_libexecdir}/xapi-storage-script/datapath/raw+block/*
+%{_libexecdir}/xapi-storage-script/volume/org.xen.xapi.storage.gfs2/*
+%{_libexecdir}/xapi-storage-script/volume/org.xen.xapi.storage.lvm2/*
+/usr/lib/python2.7/site-packages/xapi/storage/libs/*.py*
+%{_sysconfdir}/xapi.d/plugins/*
+
+%post
+echo '@DLM_CONFIG@' >> /etc/sysconfig/dlm
+
+%changelog
+* Wed Sep 30 2015 Robert Breker <robert.breker@citrix.com> - 0.2.1-2
+- Don't overwrite the upstream default datapath plugin for raw+file
+
+* Tue Sep 15 2015 David Scott <dave.scott@citrix.com> - 0.2.1-1
+- Update to 0.2.1
+
+* Fri Sep 11 2015 David Scott <dave.scott@citrix.com> - 0.1-1
+- Initial package
+
