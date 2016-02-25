@@ -10,7 +10,7 @@ class gfs2BaseCallbacks(libvhd.BaseCallbacks):
         return vol_path
     def volumeDestroy(sr, name):
         return None
-    def volumeActivateLocal(opaque, opaque, sr, sr, name):
+    def volumeActivateLocal(opaque, sr, name):
         return None
     def volumeDeactivateLocal(opaque, sr, name):
         return None
