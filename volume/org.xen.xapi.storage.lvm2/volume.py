@@ -24,7 +24,8 @@ class gfs2BaseCallbacks(libvhd.BaseCallbacks):
         return opaque
     def volumeStopOperations(opaque):
         return None
-    def volumeMetadataGetPath(opaque, key)
+    def volumeMetadataGetPath(opaque, key):
+        return None
 
 class Implementation(xapi.storage.api.volume.Volume_skeleton):
 
