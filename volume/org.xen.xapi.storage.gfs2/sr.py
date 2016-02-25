@@ -8,6 +8,7 @@ import uuid
 import urlparse
 import xapi.storage.api.volume
 from xapi.storage.common import call
+from xapi.storage.libs import libvhd
 from xapi.storage import log
 import time
 import stat
@@ -321,7 +322,9 @@ class Implementation(xapi.storage.api.volume.SR_skeleton):
         # create metadata DB
         import sqlite3
         conn = sqlite3.connect(mnt_path + "/sqlite3-metadata.db")
-        conn.execute("create table VDI(key integer primary key, snap int, parent int, name text, description text)")
+        conn.execute("create table VDI(key integer primary key, snap int,"
+                     "parent int, name text, description text, vsize text,"
+                     "uuid text)")
         conn.commit()
         conn.close()
 
@@ -370,7 +373,6 @@ class Implementation(xapi.storage.api.volume.SR_skeleton):
 
     def ls(self, dbg, sr):
         import volume
-        import libvhd
         return libvhd.ls(dbg, sr, volume.gfs2BaseCallbacks())
 
     def stat(self, dbg, sr):

@@ -17,10 +17,11 @@ def create(dbg, sr, name, description, size, cb):
 
     opq = cb.volumeStartOperations(sr, 'w')
     meta_path = cb.volumeMetadataGetPath(opq)
+    vol_uuid = str(uuid.uuid4())
 
     conn = sqlite3.connect(meta_path)
-    res = conn.execute("insert into VDI(snap, name, description) values (?, ?, ?)", 
-                       (0, name, description))
+    res = conn.execute("insert into VDI(snap, name, description, uuid, vsize) values (?, ?, ?, ?, ?)", 
+                       (0, name, description, vol_uuid, str(vsize)))
     vol_name = str(res.lastrowid)
 
     vol_path = cb.volumeCreate(opq, vol_name, size)
@@ -45,7 +46,7 @@ def create(dbg, sr, name, description, size, cb):
 
     return {
         "key": vol_name,
-        "uuid": vol_name,
+        "uuid": vol_uuid,
         "name": name,
         "description": description,
         "read_write": True,
@@ -135,61 +136,61 @@ def clone(dbg, sr, key, cb):
 def stat(dbg, sr, key, cb):
     opq = cb.volumeStartOperations(sr, 'r')
     meta_path = cb.volumeMetadataGetPath(opq)
-    d = shelve.open(meta_path)
-    meta = d[str(key)]
-    d.close()
+
+    conn = sqlite3.connect(meta_path)
+    res = conn.execute("select name,description,uuid,vsize from VDI where rowid = (?)", 
+                                          (int(key),)).fetchall()
+
+    (name,desc,uuid,vsize) = res[0]
+
+    conn.commit()
+    conn.close()
+
     psize = cb.volumeGetPhysSize(opq, key)
+
     return {
-        "uuid": key,
+        "uuid": uuid,
         "key": key,
-        "name": meta["name"],
-        "description": meta["description"],
+        "name": name,
+        "description": desc,
         "read_write": True,
-        "virtual_size": meta["vsize"],
+        "virtual_size": vsize,
         "physical_utilisation": psize,
         "uri": ["vhd+file://" + cb.volumeGetPath(opq, key)],
-        "keys": meta["keys"]
+        "keys": {}
     }
 
 def ls(dbg, sr, cb):
     results = []    
     opq = cb.volumeStartOperations(sr, 'r')
     meta_path = cb.volumeMetadataGetPath(opq)
-    d = shelve.open(meta_path)
-    klist = d.keys()
 
-    for key in klist:
-        meta = d[str(key)]
-        # We do not want to report non-leaf nodes
-        if meta["childrens"]:
-            continue
+    conn = sqlite3.connect(meta_path)
+
+    res = conn.execute("select key,name,description,uuid,vsize from VDI where key not in (select parent from VDI where parent NOT NULL group by parent)").fetchall()
+    
+    for (key_int,name,desc,uuid,vsize) in res:
+        key = str(key_int)
         psize = cb.volumeGetPhysSize(opq, key)
         results.append({
-                "uuid": key,
+                "uuid": uuid,
                 "key": key,
-                "name": meta["name"],
-                "description": meta["description"],
+                "name": name,
+                "description": desc,
                 "read_write": True,
-                "virtual_size": meta["vsize"],
+                "virtual_size": vsize,
                 "physical_utilisation": psize,
                 "uri": ["vhd+file://" + cb.volumeGetPath(opq, key)],
-                "keys": meta["keys"]
+                "keys": {}
         })
 
-    d.close()
     return results
 
 def set(dbg, sr, key, k, v, cb):
-    set_property(dbg, sr, key, k, v, cb)
+    return
 
 def unset(dbg, sr, key, k, cb):
-    opq = cb.volumeStartOperations(sr, 'w')
-    meta_path = cb.volumeMetadataGetPath(opq)
-    d = shelve.open(meta_path)
-    meta = d[str(key)]
-    del meta[k]
-    d[str(key)] = meta
-    d.close()
+    return
 
 def set_name(dbg, sr, key, new_name, cb):
     set_property(dbg, sr, key, "name", new_name, cb)
@@ -200,8 +201,10 @@ def set_description(dbg, sr, key, new_description, cb):
 def set_property(dbg, sr, key, field, value, cb):
     opq = cb.volumeStartOperations(sr, 'w')
     meta_path = cb.volumeMetadataGetPath(opq)
-    d = shelve.open(meta_path)
-    meta = d[str(key)]
-    meta[field] = value
-    d[str(key)] = meta
-    d.close()
+    
+    conn = sqlite3.connect(meta_path)
+    query = ("update VDI set %s = (?) where rowid = (?)" % field)
+    res = conn.execute(query, (value, int(key),) )
+
+    conn.commit()
+    conn.close()
