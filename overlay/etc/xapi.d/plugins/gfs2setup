@@ -57,14 +57,11 @@ def testCorosync():
 
 
 def setupCorosync(session, pool_uuid):
-    call(["/usr/sbin/modprobe", "gfs2"])
-    call(["/usr/sbin/modprobe", "configfs"])
-
     sysconfigdlm = open("/etc/sysconfig/dlm", "w")
-    sysconfigdlm.write("DLM_CONTROLD_OPTS=\"--enable_fencing=0 --enable_quorum_fencing=0 -K\"")
-    coroconf.close()
+    sysconfigdlm.write("DLM_CONTROLD_OPTS=\"--enable_fencing=0 --enable_quorum_fencing=0 -K\"\n")
+    sysconfigdlm.close()
 
-    call(["/usr/sbin/modprobe", "dlm"])
+    call(["/usr/sbin/modprobe", "gfs2"])
 
     conf = """totem {
   version: 2

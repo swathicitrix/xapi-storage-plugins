@@ -19,9 +19,9 @@ def create(dbg, sr, name, description, size, cb):
     meta_path = cb.volumeMetadataGetPath(opq)
 
     conn = sqlite3.connect(meta_path)
-    res = conn.execute("insert into VOLUMES(snap, name, description) values (?, ?, ?)", 
+    res = conn.execute("insert into VDI(snap, name, description) values (?, ?, ?)", 
                        (0, name, description))
-    vol_name = res.lastrowid
+    vol_name = str(res.lastrowid)
 
     vol_path = cb.volumeCreate(opq, vol_name, size)
     cb.volumeActivateLocal(opq, vol_name)
@@ -61,7 +61,7 @@ def destroy(dbg, sr, name, cb):
     meta_path = cb.volumeMetadataGetPath(opq)
 
     conn = sqlite3.connect(meta_path)
-    res = conn.execute("delete from VOLUMES where rowid = (?)", (int(name),))
+    res = conn.execute("delete from VDI where rowid = (?)", (int(name),))
     conn.commit()
     conn.close()
 

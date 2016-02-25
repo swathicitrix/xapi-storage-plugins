@@ -6,7 +6,7 @@ import os
 import sys
 import xapi.storage.api.volume
 from xapi.storage import log
-import libvhd
+from xapi.storage.libs import libvhd
 
 class gfs2BaseCallbacks():
     def volumeCreate(self, opq, name, size):
@@ -50,12 +50,14 @@ class gfs2BaseCallbacks():
         stat = os.stat(os.path.join(opq, name, name))
         return stat.st_blocks * 512
     def volumeStartOperations(self, sr, mode):
-        opq = urlparse.urlparse(sr).path
+        return urlparse.urlparse(sr).path
+        import sr
+        opq = sr.getSRpath("dbg", sr)
         return opq
     def volumeStopOperations(self, opq):
         pass
     def volumeMetadataGetPath(self, opq):
-        return os.path.join(opq, "meta")
+        return os.path.join(opq, "sqlite3-metadata.db")
         
 
 class Implementation(xapi.storage.api.volume.Volume_skeleton):
