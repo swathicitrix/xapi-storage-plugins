@@ -10,12 +10,14 @@ from xapi.storage.libs import libvhd
 
 class gfs2BaseCallbacks():
     def volumeCreate(self, opq, name, size):
+        log.debug("volumeCreate opq=%s name=%s size=%d" % (opq, name, size))
         vol_dir = os.path.join(opq, name)
         vol_path = os.path.join(vol_dir, name)
         os.makedirs(vol_dir, mode=0755)
         open(vol_path, 'a').close()
         return vol_path
     def volumeDestroy(self, opq, name):
+        log.debug("volumeDestroy opq=%s name=%s" % (opq, name))
         vol_dir = os.path.join(opq, name)
         vol_path = os.path.join(vol_dir, name)
         try:
@@ -33,12 +35,14 @@ class gfs2BaseCallbacks():
             else:
                 raise
     def volumeGetPath(self, opq, name):
+        log.debug("volumeGetPath opq=%s name=%s" % (opq, name))
         return os.path.join(opq, name, name)
     def volumeActivateLocal(self, opq, name):
         pass
     def volumeDeactivateLocal(self, opq, name):
         pass
     def volumeRename(self, opq, old_name, new_name):
+        log.debug("volumeRename opq=%s old=%s new=%s" % (opq, old_name, new_name))
         os.rename(os.path.join(opq, old_name),
                   os.path.join(opq, new_name))
         os.rename(os.path.join(opq, new_name, old_name),

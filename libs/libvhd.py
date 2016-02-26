@@ -4,7 +4,8 @@ import uuid
 import sqlite3
 import os
 from xapi.storage.common import call
-
+from xapi.storage import log
+import xapi.storage.libs.poolhelper
 
 def create(dbg, sr, name, description, size, cb):
 
@@ -65,21 +66,28 @@ def destroy(dbg, sr, name, cb):
     res = conn.execute("delete from VDI where rowid = (?)", (int(name),))
     conn.commit()
     conn.close()
+    cb.volumeStopOperations(opq)
 
 def clone(dbg, sr, key, cb):
-    snap_name = str(uuid.uuid4()) + ".vhd"
-    base_name = str(uuid.uuid4()) + ".vhd"
+    snap_uuid = str(uuid.uuid4())
 
     opq = cb.volumeStartOperations(sr, 'w')
     meta_path = cb.volumeMetadataGetPath(opq)
+    key_path = cb.volumeGetPath(opq, key)
 
-    d = shelve.open(meta_path)
-    meta_parent = d[str(key)]
-    snap_path = cb.volumeCreate(opq, snap_name, meta_parent["vsize"])
+    conn = sqlite3.connect(meta_path)
+    res = conn.execute("select name,parent,description,uuid,vsize from VDI where rowid = (?)",
+                       (int(key),)).fetchall()
+    (p_name, p_parent, p_desc, p_uuid, p_vsize) = res[0]
+    
+    res = conn.execute("insert into VDI(snap, parent, name, description, uuid, vsize) values (?, ?, ?, ?, ?, ?)", 
+                       (0, int(key), p_name, p_desc, snap_uuid, p_vsize))
+    snap_name = str(res.lastrowid)
+    snap_path = cb.volumeCreate(opq, snap_name, int(p_vsize))
 
     # Snapshot from key
     cmd = ["/usr/bin/vhd-util", "snapshot",
-               "-n", snap_path, "-p", cb.volumeGetPath(opq, key)]
+               "-n", snap_path, "-p", key_path]
     output = call(dbg, cmd)
     
     # NB. As an optimisation, "vhd-util snapshot A->B" will check if
@@ -94,43 +102,41 @@ def clone(dbg, sr, key, cb):
 
     if parent_key[-12:] == key[-12:]:
         log.debug("%s: Volume.snapshot: parent_key == key" % (dbg))
-
+        xapi.storage.libs.poolhelper.suspend_datapath_in_pool(dbg, key_path)
+        res = conn.execute("insert into VDI(snap, parent) values (?, ?)",
+                           (0, p_parent))
+        base_name = str(res.lastrowid)
         base_path = cb.volumeRename(opq, key, base_name)
-        cb.volumeCreate(opq, key, size)
+        cb.volumeCreate(opq, key, int(p_vsize))
+
         cmd = ["/usr/bin/vhd-util", "snapshot",
-               "-n", key, "-p", base_path]
+               "-n", key_path, "-p", base_path]
         output = call(dbg, cmd)
 
         # Finally, update the snapshot parent to the rebased volume
         cmd = ["/usr/bin/vhd-util", "modify",
                "-n", snap_path, "-p", base_path]
         output = call(dbg, cmd)
+        res = conn.execute("update VDI set parent = (?) where rowid = (?)",
+                           (int(base_name), int(snap_name),) )
+        
+        xapi.storage.libs.poolhelper.resume_datapath_in_pool(dbg, key_path)
 
-        meta_base = {
-            "name": "",
-            "description": "",
-            "vsize": "",
-            "keys": {},
-            "childrens": [snap_name, key],
-            "parent": meta_parent["parent"]
-        }
-        d[base_name] = meta_base
-
-    d[snap_name] = meta_parent 
-    d.close()
-
+    conn.commit()
+    conn.close()
     psize = cb.volumeGetPhysSize(opq, snap_name)
+    cb.volumeStopOperations(opq)
 
     return {
-        "uuid": snap_name,
+        "uuid": snap_uuid,
         "key": snap_name,
-        "name": meta_parent["name"],
-        "description": meta_parent["description"],
+        "name": p_name,
+        "description": p_desc,
         "read_write": True,
-        "virtual_size": meta_parent["vsize"],
+        "virtual_size": p_vsize,
         "physical_utilisation": psize,
         "uri": ["vhd+lv://" + snap_path],
-        "keys": meta_parent["keys"]
+        "keys": {}
     }
 
 def stat(dbg, sr, key, cb):
@@ -139,14 +145,13 @@ def stat(dbg, sr, key, cb):
 
     conn = sqlite3.connect(meta_path)
     res = conn.execute("select name,description,uuid,vsize from VDI where rowid = (?)", 
-                                          (int(key),)).fetchall()
-
-    (name,desc,uuid,vsize) = res[0]
-
+                       (int(key),)).fetchall()
     conn.commit()
     conn.close()
 
+    (name,desc,uuid,vsize) = res[0]
     psize = cb.volumeGetPhysSize(opq, key)
+    cb.volumeStopOperations(opq)
 
     return {
         "uuid": uuid,
@@ -208,3 +213,4 @@ def set_property(dbg, sr, key, field, value, cb):
 
     conn.commit()
     conn.close()
+    cb.volumeStopOperations(opq)
