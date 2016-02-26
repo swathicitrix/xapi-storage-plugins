@@ -6,11 +6,11 @@ License:        LGPL
 URL:            https://github.com/xapi-project/xapi-storage-plugins
 Source0:        https://github.com/xapi-project/%{name}/archive/v%{version}/%{name}-%{version}.tar.bz2
 Requires:       xapi-storage
-Requires:       corosync
-Requires:       corosynclib
-Requires:       dlm
-Requires:       dlm-lib
-Requires:       gfs2-utils
+#Requires:       corosync
+#Requires:       corosynclib
+#Requires:       dlm
+#Requires:       dlm-lib
+#Requires:       gfs2-utils
 
 %description
 Storage plugins for the xapi toolstack.
