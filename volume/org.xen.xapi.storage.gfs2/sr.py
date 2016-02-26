@@ -175,6 +175,51 @@ def rescanSession(dbg, sessionid):
     log.debug("%s: output = '%s'" % (dbg, output))
     # FIXME: check for success
 
+def getDesiredInitiatorName(dbg):
+    # FIXME: for now, get this from xapi. In future, xapi will write this to a file we can read from.
+    inventory = xcp.environ.readInventory()
+    session = XenAPI.xapi_local()
+    session.xenapi.login_with_password("root", "")
+    this_host = session.xenapi.host.get_by_uuid(inventory.get("INSTALLATION_UUID"))
+    return session.xenapi.host.get_other_config(this_host)['iscsi_iqn']
+
+def setInitiatorName(dbg, iqn):
+    with open('/etc/iscsi/initiatorname.iscsi', "w") as fd:
+        fd.write('InitiatorName=%s\n' % (iqn))
+
+def getCurrentInitiatorName(dbg):
+    with open('/etc/iscsi/initiatorname.iscsi', "r") as fd:
+        lines = fd.readlines()
+        for line in lines:
+            if not line.strip().startswith("#") and "InitiatorName" in line:
+                return line.split('=')[1].strip()
+
+def restartISCSIDaemon(dbg):
+    cmd = ["/usr/bin/systemctl", "restart", "iscsid"]
+    call(dbg, cmd)
+
+def isISCSIDaemonRunning(dbg):
+    cmd = ["/usr/bin/systemctl", "status", "iscsid"]
+    (stdout, stderr, rc) = call(dbg, cmd, error=False, simple=False)
+    return rc == 0
+
+def configureISCSIDaemon(dbg):
+    # Find out what the user wants the IQN to be
+    iqn = getDesiredInitiatorName(dbg)
+
+    # Make that the IQN, if possible
+    if not isISCSIDaemonRunning(dbg):
+        setInitiatorName(dbg, iqn)
+        restartISCSIDaemon(dbg)
+    else:
+        cur_iqn = getCurrentInitiatorName(dbg)
+        if iqn != cur_iqn:
+            if len(listSessions(dbg)) > 0:
+                raise xapi.storage.api.volume.Unimplemented("Daemon running with sessions from IQN '%s', desired IQN '%s'" % (cur_iqn, iqn))
+            else:
+                setInitiatorName(dbg, iqn)
+                restartISCSIDaemon(dbg)
+
 def zoneInLUN(dbg, uri):
     log.debug("%s: zoneInLUN uri=%s" % (dbg, uri))
 
@@ -193,7 +238,9 @@ def zoneInLUN(dbg, uri):
             usechap = True
             [username, password] = target[0:atindex].split('%')
             target = target[atindex+1:]
-        
+
+        configureISCSIDaemon(dbg)
+
         current_sessions = listSessions(dbg)
         log.debug("%s: current iSCSI sessions are %s" % (dbg, current_sessions))
         sessionid = findMatchingSession(dbg, target, iqn, current_sessions)
