@@ -1,103 +1,46 @@
 #!/usr/bin/env python
 
-import urlparse
-import errno
 import os
 import sys
 import xapi.storage.api.volume
 from xapi.storage import log
 from xapi.storage.libs import libvhd
-
-class gfs2BaseCallbacks():
-    def volumeCreate(self, opq, name, size):
-        log.debug("volumeCreate opq=%s name=%s size=%d" % (opq, name, size))
-        vol_dir = os.path.join(opq, name)
-        vol_path = os.path.join(vol_dir, name)
-        os.makedirs(vol_dir, mode=0755)
-        open(vol_path, 'a').close()
-        return vol_path
-    def volumeDestroy(self, opq, name):
-        log.debug("volumeDestroy opq=%s name=%s" % (opq, name))
-        vol_dir = os.path.join(opq, name)
-        vol_path = os.path.join(vol_dir, name)
-        try:
-            os.unlink(vol_path)
-        except OSError as exc:
-            if exc.errno == errno.ENOENT:
-                pass
-            else:
-                raise
-        try:
-            os.rmdir(vol_dir)
-        except OSError as exc:
-            if exc.errno == errno.ENOENT:
-                pass
-            else:
-                raise
-    def volumeGetPath(self, opq, name):
-        log.debug("volumeGetPath opq=%s name=%s" % (opq, name))
-        return os.path.join(opq, name, name)
-    def volumeActivateLocal(self, opq, name):
-        pass
-    def volumeDeactivateLocal(self, opq, name):
-        pass
-    def volumeRename(self, opq, old_name, new_name):
-        log.debug("volumeRename opq=%s old=%s new=%s" % (opq, old_name, new_name))
-        os.rename(os.path.join(opq, old_name),
-                  os.path.join(opq, new_name))
-        os.rename(os.path.join(opq, new_name, old_name),
-                  os.path.join(opq, new_name, new_name))
-        return os.path.join(opq, new_name, new_name)
-    def volumeResize(self, opq, name, new_size):
-        pass
-    def volumeGetPhysSize(self, opq, name):
-        stat = os.stat(os.path.join(opq, name, name))
-        return stat.st_blocks * 512
-    def volumeStartOperations(self, sr, mode):
-        return urlparse.urlparse(sr).path
-        import sr
-        opq = sr.getSRpath("dbg", sr)
-        return opq
-    def volumeStopOperations(self, opq):
-        pass
-    def volumeMetadataGetPath(self, opq):
-        return os.path.join(opq, "sqlite3-metadata.db")
-        
+import gfs2
 
 class Implementation(xapi.storage.api.volume.Volume_skeleton):
 
     def clone(self, dbg, sr, key):
-        return libvhd.clone(dbg, sr, key, gfs2BaseCallbacks())
+        return libvhd.clone(dbg, sr, key, gfs2.Callbacks())
 
     def snapshot(self, dbg, sr, key):
-        return libvhd.clone(dbg, sr, key, gfs2BaseCallbacks())
+        return libvhd.clone(dbg, sr, key, gfs2.Callbacks())
 
     def create(self, dbg, sr, name, description, size):
         return libvhd.create(dbg, sr, name, description, size, 
-                             gfs2BaseCallbacks())
+                             gfs2.Callbacks())
 
     def destroy(self, dbg, sr, key):
-        return libvhd.destroy(dbg, sr, key, gfs2BaseCallbacks())
+        return libvhd.destroy(dbg, sr, key, gfs2.Callbacks())
 
     def resize(self, dbg, sr, key, new_size):
         return libvhd.destroy(dbg, sr, key, new_size, 
-                              gfs2BaseCallbacks())
+                              gfs2.Callbacks())
 
     def set(self, dbg, sr, key, k, v):
-        libvhd.set(dbg, sr, key, k, v, gfs2BaseCallbacks())
+        libvhd.set(dbg, sr, key, k, v, gfs2.Callbacks())
 
     def unset(self, dbg, sr, key, k):
-        libvhd.unset(dbg, sr, key, k, gfs2BaseCallbacks())
+        libvhd.unset(dbg, sr, key, k, gfs2.Callbacks())
 
     def set_description(self, dbg, sr, key, new_description):
         libvhd.set_description(dbg, sr, key, new_description,
-                               gfs2BaseCallbacks())
+                               gfs2.Callbacks())
 
     def set_name(self, dbg, sr, key, new_name):
-        libvhd.set_name(dbg, sr, key, new_name, gfs2BaseCallbacks())
+        libvhd.set_name(dbg, sr, key, new_name, gfs2.Callbacks())
 
     def stat(self, dbg, sr, key):
-        return libvhd.stat(dbg, sr, key, gfs2BaseCallbacks())
+        return libvhd.stat(dbg, sr, key, gfs2.Callbacks())
 
 if __name__ == "__main__":
     log.log_call_argv()

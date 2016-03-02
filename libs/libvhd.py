@@ -3,9 +3,18 @@
 import uuid
 import sqlite3
 import os
+import urlparse
+import sys
 from xapi.storage.common import call
 from xapi.storage import log
 import xapi.storage.libs.poolhelper
+import xapi.storage.api.datapath
+import xapi.storage.api.volume
+from xapi.storage.libs import tapdisk, image
+import pickle
+
+TD_PROC_METADATA_DIR = "/var/run/nonpersistent/dp-tapdisk"
+TD_PROC_METADATA_FILE = "meta.pickle"
 
 def create(dbg, sr, name, description, size, cb):
 
@@ -53,7 +62,7 @@ def create(dbg, sr, name, description, size, cb):
         "read_write": True,
         "virtual_size": vsize,
         "physical_utilisation": psize,
-        "uri": ["vhd+file://" + vol_path],
+        "uri": ["vhd+tapdisk://gfs2/" + vol_path],
         "keys": {},
     }
 
@@ -135,7 +144,7 @@ def clone(dbg, sr, key, cb):
         "read_write": True,
         "virtual_size": p_vsize,
         "physical_utilisation": psize,
-        "uri": ["vhd+lv://" + snap_path],
+        "uri": ["vhd+tapdisk://gfs2/" + snap_path],
         "keys": {}
     }
 
@@ -161,7 +170,7 @@ def stat(dbg, sr, key, cb):
         "read_write": True,
         "virtual_size": vsize,
         "physical_utilisation": psize,
-        "uri": ["vhd+file://" + cb.volumeGetPath(opq, key)],
+        "uri": ["vhd+tapdisk://gfs2/" + cb.volumeGetPath(opq, key)],
         "keys": {}
     }
 
@@ -185,7 +194,7 @@ def ls(dbg, sr, cb):
                 "read_write": True,
                 "virtual_size": vsize,
                 "physical_utilisation": psize,
-                "uri": ["vhd+file://" + cb.volumeGetPath(opq, key)],
+                "uri": ["vhd+tapdisk://gfs2/" + cb.volumeGetPath(opq, key)],
                 "keys": {}
         })
 
@@ -214,3 +223,89 @@ def set_property(dbg, sr, key, field, value, cb):
     conn.commit()
     conn.close()
     cb.volumeStopOperations(opq)
+
+
+
+# here we have all datapath facing functions
+
+def activate(dbg, uri, domain, cb):
+    u = urlparse.urlparse(uri)
+    # XXX need some datapath-specific errors below
+    if not(os.path.exists(u.path)):
+        raise xapi.storage.api.volume.Volume_does_not_exist(u.path)
+    if u.scheme[:3] == "vhd":
+        img = image.Vhd(u.path)
+    elif u.scheme[:3] == "raw":
+        img = image.Raw(u.path)
+    else:
+        raise
+    tap = load_tapdisk(dbg, uri)
+    tap.open(dbg, img)
+    save_tapdisk(dbg, uri, tap)
+
+def attach(dbg, uri, domain, cb):
+    tap = tapdisk.create(dbg)
+    save_tapdisk(dbg, uri, tap)
+    return {
+        'domain_uuid': '0',
+        'implementation': ['Tapdisk3', tap.block_device()],
+        }
+
+def epcclose(dbg, uri, cb):
+    u = urlparse.urlparse(uri)
+    # XXX need some datapath-specific errors below
+    if not(os.path.exists(u.path)):
+        raise xapi.storage.api.volume.Volume_does_not_exist(u.path)
+    return None
+
+def detach(dbg, uri, domain, cb):
+    tap = load_tapdisk(dbg, uri)
+    tap.destroy(dbg)
+    forget_tapdisk(dbg, uri)
+
+def deactivate(dbg, uri, domain, cb):
+    tap = load_tapdisk(dbg, uri)
+    tap.close(dbg)
+
+def epcopen(dbg, uri, persistent, cb):
+    u = urlparse.urlparse(uri)
+    # XXX need some datapath-specific errors below
+    if not(os.path.exists(u.path)):
+        raise xapi.storage.api.volume.Volume_does_not_exist(u.path)
+    return None
+
+def _metadata_dir(uri):
+    return TD_PROC_METADATA_DIR + "/" + uri
+
+def save_tapdisk(dbg, uri, tap):
+    """ Record the tapdisk metadata for this URI in host-local storage """
+    dirname = _metadata_dir(uri)
+    try:
+        os.makedirs(dirname, mode=0755)
+    except OSError as e:
+        if e.errno != 17:  # 17 == EEXIST, which is harmless
+            raise e
+    with open(dirname + "/" + TD_PROC_METADATA_FILE, "w") as fd:
+        pickle.dump(tap.__dict__, fd)
+
+def load_tapdisk(dbg, uri):
+    """Recover the tapdisk metadata for this URI from host-local
+    storage."""
+    dirname = _metadata_dir(uri)
+    if not(os.path.exists(dirname)):
+        # XXX throw a better exception
+        raise xapi.storage.api.volume.Volume_does_not_exist(dirname)
+    with open(dirname + "/" + TD_PROC_METADATA_FILE, "r") as fd:
+        meta = pickle.load(fd)
+        tap = tapdisk.Tapdisk(meta['minor'], meta['pid'], meta['f'])
+        tap.secondary = meta['secondary']
+        return tap
+
+def forget_tapdisk(dbg, uri):
+    """Delete the tapdisk metadata for this URI from host-local storage."""
+    dirname = _metadata_dir(uri)
+    try:
+        os.unlink(dirname + "/" + TD_PROC_METADATA_FILE)
+    except:
+        pass
+        
