@@ -1,4 +1,4 @@
-LIBS_FILES=__init__.py device.py iscsi.py losetup.py tapdisk.py dmsetup.py nbdclient.py nbdtool.py image.py libvhd.py poolhelper.py
+LIBS_FILES=__init__.py device.py iscsi.py losetup.py tapdisk.py dmsetup.py nbdclient.py nbdtool.py image.py libvhd.py poolhelper.py libiscsi.py
 PLUGINS=suspend-resume-datapath gfs2setup
 
 .PHONY: clean
