@@ -57,3 +57,5 @@ class Callbacks():
         pass
     def volumeMetadataGetPath(self, opq):
         return os.path.join(opq, "sqlite3-metadata.db")
+    def getVolumeURI(self, opq, name):
+        return "gfs2/" + opq + "|" + name

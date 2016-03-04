@@ -220,7 +220,7 @@ class Implementation(xapi.storage.api.volume.SR_skeleton):
         conn = sqlite3.connect(mnt_path + "/sqlite3-metadata.db")
         conn.execute("create table VDI(key integer primary key, snap int,"
                      "parent int, name text, description text, vsize text,"
-                     "uuid text)")
+                     "uuid text, active_on text)")
         conn.commit()
         conn.close()
 

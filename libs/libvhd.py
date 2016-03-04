@@ -15,6 +15,7 @@ import pickle
 
 TD_PROC_METADATA_DIR = "/var/run/nonpersistent/dp-tapdisk"
 TD_PROC_METADATA_FILE = "meta.pickle"
+DP_URI_PREFIX = "vhd+tapdisk://"
 
 def create(dbg, sr, name, description, size, cb):
 
@@ -47,8 +48,7 @@ def create(dbg, sr, name, description, size, cb):
     # Fetch physical utilisation
     psize = cb.volumeGetPhysSize(opq, vol_name)
 
-    # Save metadata
-
+    vol_uri = cb.getVolumeURI(opq, vol_name)
     cb.volumeStopOperations(opq)
 
     conn.commit()
@@ -62,17 +62,17 @@ def create(dbg, sr, name, description, size, cb):
         "read_write": True,
         "virtual_size": vsize,
         "physical_utilisation": psize,
-        "uri": ["vhd+tapdisk://gfs2/" + vol_path],
+        "uri": [DP_URI_PREFIX + vol_uri],
         "keys": {},
     }
 
-def destroy(dbg, sr, name, cb):
+def destroy(dbg, sr, key, cb):
     opq = cb.volumeStartOperations(sr, 'w')
-    cb.volumeDestroy(opq, name)
+    cb.volumeDestroy(opq, key)
     meta_path = cb.volumeMetadataGetPath(opq)
 
     conn = sqlite3.connect(meta_path)
-    res = conn.execute("delete from VDI where rowid = (?)", (int(name),))
+    res = conn.execute("delete from VDI where rowid = (?)", (int(key),))
     conn.commit()
     conn.close()
     cb.volumeStopOperations(opq)
@@ -134,6 +134,7 @@ def clone(dbg, sr, key, cb):
     conn.commit()
     conn.close()
     psize = cb.volumeGetPhysSize(opq, snap_name)
+    snap_uri = cb.getVolumeURI(opq, snap_name)
     cb.volumeStopOperations(opq)
 
     return {
@@ -144,7 +145,7 @@ def clone(dbg, sr, key, cb):
         "read_write": True,
         "virtual_size": p_vsize,
         "physical_utilisation": psize,
-        "uri": ["vhd+tapdisk://gfs2/" + snap_path],
+        "uri": [DP_URI_PREFIX + snap_uri],
         "keys": {}
     }
 
@@ -160,6 +161,7 @@ def stat(dbg, sr, key, cb):
 
     (name,desc,uuid,vsize) = res[0]
     psize = cb.volumeGetPhysSize(opq, key)
+    key_uri = cb.getVolumeURI(opq, key)
     cb.volumeStopOperations(opq)
 
     return {
@@ -170,7 +172,7 @@ def stat(dbg, sr, key, cb):
         "read_write": True,
         "virtual_size": vsize,
         "physical_utilisation": psize,
-        "uri": ["vhd+tapdisk://gfs2/" + cb.volumeGetPath(opq, key)],
+        "uri": [DP_URI_PREFIX + key_uri],
         "keys": {}
     }
 
@@ -186,6 +188,8 @@ def ls(dbg, sr, cb):
     for (key_int,name,desc,uuid,vsize) in res:
         key = str(key_int)
         psize = cb.volumeGetPhysSize(opq, key)
+        vol_path = cb.volumeGetPath(opq, key)
+        vol_uri = cb.getVolumeURI(opq, key)
         results.append({
                 "uuid": uuid,
                 "key": key,
@@ -194,10 +198,11 @@ def ls(dbg, sr, cb):
                 "read_write": True,
                 "virtual_size": vsize,
                 "physical_utilisation": psize,
-                "uri": ["vhd+tapdisk://gfs2/" + cb.volumeGetPath(opq, key)],
+                "uri": [DP_URI_PREFIX + vol_uri],
                 "keys": {}
         })
 
+    cb.volumeStopOperations(opq)
     return results
 
 def set(dbg, sr, key, k, v, cb):
@@ -228,46 +233,76 @@ def set_property(dbg, sr, key, field, value, cb):
 
 # here we have all datapath facing functions
 
-def activate(dbg, uri, domain, cb):
-    u = urlparse.urlparse(uri)
-    # XXX need some datapath-specific errors below
-    if not(os.path.exists(u.path)):
-        raise xapi.storage.api.volume.Volume_does_not_exist(u.path)
-    if u.scheme[:3] == "vhd":
-        img = image.Vhd(u.path)
-    elif u.scheme[:3] == "raw":
-        img = image.Raw(u.path)
-    else:
-        raise
-    tap = load_tapdisk(dbg, uri)
-    tap.open(dbg, img)
-    save_tapdisk(dbg, uri, tap)
+def parse_datapath_uri(uri):
+    # uri will be like:
+    # "vhd+tapdisk://<sr-type>/<sr-mount-or-volume-group>|<volume-name>"
+    mount_or_vg,name = urlparse.urlparse(uri).path.split("|") 
+    return ("vhd:///" + mount_or_vg, name)     
 
 def attach(dbg, uri, domain, cb):
+    sr,name = parse_datapath_uri(uri)
+    opq = cb.volumeStartOperations(sr, 'r')
+    # activate LVs chain here
+    vol_path = cb.volumeGetPath(opq, name)
     tap = tapdisk.create(dbg)
-    save_tapdisk(dbg, uri, tap)
+    save_tapdisk(dbg, vol_path, tap)
     return {
         'domain_uuid': '0',
         'implementation': ['Tapdisk3', tap.block_device()],
         }
 
-def epcclose(dbg, uri, cb):
+def activate(dbg, uri, domain, cb):
+    import platform
+    sr,name = parse_datapath_uri(uri)
+    opq = cb.volumeStartOperations(sr, 'w')
+    vol_path = cb.volumeGetPath(opq, name)
+    meta_path = cb.volumeMetadataGetPath(opq)
+
+    conn = sqlite3.connect(meta_path)
+    res = conn.execute("update VDI set active_on = (?) where rowid = (?)",
+                       (platform.node(), int(name),) )
+
+    img = image.Vhd(vol_path)
+    tap = load_tapdisk(dbg, vol_path)
+    tap.open(dbg, img)
+    save_tapdisk(dbg, vol_path, tap)
+
+    conn.commit()
+    conn.close()
+    
+def deactivate(dbg, uri, domain, cb):
+    sr,name = parse_datapath_uri(uri)
+    opq = cb.volumeStartOperations(sr, 'w')
+    vol_path = cb.volumeGetPath(opq, name)
+    meta_path = cb.volumeMetadataGetPath(opq)
+
+    conn = sqlite3.connect(meta_path)
+    res = conn.execute("update VDI set active_on = (?) where rowid = (?)",
+                       ("", int(name),) )
+
+    tap = load_tapdisk(dbg, vol_path)
+    tap.close(dbg)
+
+    conn.commit()
+    conn.close()
+
+def detach(dbg, uri, domain, cb):
+    sr,name = parse_datapath_uri(uri)
+    opq = cb.volumeStartOperations(sr, 'r')
+    # deactivate LVs chain here
+    vol_path = cb.volumeGetPath(opq, name)
+    tap = load_tapdisk(dbg, vol_path)
+    tap.destroy(dbg)
+    forget_tapdisk(dbg, vol_path)
+
+def epcopen(dbg, uri, persistent, cb):
     u = urlparse.urlparse(uri)
     # XXX need some datapath-specific errors below
     if not(os.path.exists(u.path)):
         raise xapi.storage.api.volume.Volume_does_not_exist(u.path)
     return None
 
-def detach(dbg, uri, domain, cb):
-    tap = load_tapdisk(dbg, uri)
-    tap.destroy(dbg)
-    forget_tapdisk(dbg, uri)
-
-def deactivate(dbg, uri, domain, cb):
-    tap = load_tapdisk(dbg, uri)
-    tap.close(dbg)
-
-def epcopen(dbg, uri, persistent, cb):
+def epcclose(dbg, uri, cb):
     u = urlparse.urlparse(uri)
     # XXX need some datapath-specific errors below
     if not(os.path.exists(u.path)):
