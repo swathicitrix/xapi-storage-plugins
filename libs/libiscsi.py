@@ -2,7 +2,7 @@
 
 import uuid
 import sqlite3
-import os
+import os, sys
 import time
 import urlparse
 import stat
@@ -11,6 +11,101 @@ from xapi.storage import log
 import xapi.storage.libs.poolhelper
 import xcp.environ
 import XenAPI
+import socket
+import iscsi
+import xml.dom.minidom
+
+DEFAULT_PORT = 3260
+
+#FIXME: Review function
+def print_iqn_entries(map):
+    dom = xml.dom.minidom.Document()
+    element = dom.createElement("iscsi-target-iqns")
+    dom.appendChild(element)
+    count = 0
+    for address,tpgt,iqn in map:
+        entry = dom.createElement('TGT')
+        element.appendChild(entry)
+        subentry = dom.createElement('Index')
+        entry.appendChild(subentry)
+        textnode = dom.createTextNode(str(count))
+        subentry.appendChild(textnode)
+
+        try:
+            # We always expect a port so this holds
+            # regardless of IP version
+            (addr, port) = address.rsplit(':', 1)
+        except:
+            addr = address
+            port = DEFAULT_PORT
+        subentry = dom.createElement('IPAddress')
+        entry.appendChild(subentry)
+        textnode = dom.createTextNode(str(addr))
+        subentry.appendChild(textnode)
+
+        if int(port) != DEFAULT_PORT:
+            subentry = dom.createElement('Port')
+            entry.appendChild(subentry)
+            textnode = dom.createTextNode(str(port))
+            subentry.appendChild(textnode)
+
+        subentry = dom.createElement('TargetIQN')
+        entry.appendChild(subentry)
+        textnode = dom.createTextNode(str(iqn))
+        subentry.appendChild(textnode)
+        count += 1
+    print >>sys.stderr,dom.toprettyxml()
+
+def parse_node_output(text):
+    """helper function - parses the output of iscsiadm for discovery and
+    get_node_records"""
+    def dotrans(x):
+        (rec,iqn) = x.split()
+        (portal,tpgt) = rec.split(',')
+        return (portal,tpgt,iqn)
+    return map(dotrans,(filter(lambda x: x != '', text.split('\n'))))
+
+def discoverIQN(dbg, target, usechap=False, username=None, password=None, 
+                interfaceArray=["default"]):
+
+    """Run iscsiadm in discovery mode to obtain a list of the 
+    TargetIQNs available on the specified target and port. Returns
+    a list of triples - the portal (ip:port), the tpgt (target portal
+    group tag) and the target name"""
+
+    #FIXME: Important: protect against resetting boot disks on the same 
+    # target
+        
+    cmd_base = ["-t", "st", "-p", target]
+    for interface in interfaceArray:
+        cmd_base.append("-I")
+        cmd_base.append(interface)
+    cmd_disc = ["iscsiadm", "-m", "discovery"] + cmd_base
+    cmd_discdb = ["iscsiadm", "-m", "discoverydb"] + cmd_base
+    auth_args =  ["-n", "discovery.sendtargets.auth.authmethod", "-v", "CHAP",
+                  "-n", "discovery.sendtargets.auth.username", "-v", username,
+                  "-n", "discovery.sendtargets.auth.password", "-v", password]
+    fail_msg = "Discovery failed. Check target settings and " \
+               "username/password (if applicable)"
+    try:    
+        if usechap == True: 
+            # Unfortunately older version of iscsiadm won't fail on new modes
+            # it doesn't recognize (rc=0), so we have to test it out
+            support_discdb = "discoverydb" in util.pread2(["iscsiadm", "-h"])
+            if support_discdb:
+                exn_on_failure(cmd_discdb + ["-o", "new"], fail_msg)
+                exn_on_failure(cmd_discdb + ["-o", "update"] + auth_args, fail_msg)
+                cmd = cmd_discdb + ["--discover"]
+            else:
+                cmd = cmd_disc + ["-X", chapuser, "-x", chappass]
+        else:
+            cmd = cmd_disc
+        stdout = call(dbg, cmd)
+    except:
+        raise xapi.storage.api.volume.Unimplemented(
+            "Error logging into: %s" % target)
+
+    return parse_node_output(stdout)
 
 def login(dbg, target, iqn, usechap=False, username=None, password=None):
     cmd = ["/usr/sbin/iscsiadm", "-m", "discovery", "-t", "st", "-p", target]
@@ -132,13 +227,19 @@ def configureISCSIDaemon(dbg):
                 restartISCSIDaemon(dbg)
 
 def decomposeISCSIuri(dbg, uri):
-    if (uri.scheme != "iscsi" or not uri.netloc or not uri.path):
+    if (uri.scheme != "iscsi"):
         raise xapi.storage.api.volume.SR_does_not_exist(
               "The SR URI is invalid; please use \
                iscsi://<target>/<targetIQN>/<lun>")
 
-    target = uri.netloc
-    [null, iqn, lunid] = uri.path.split("/")
+    target = None
+    iqn = None
+    lunid = None
+
+    if uri.netloc:  
+    	target = uri.netloc
+    if uri.path:
+    	[null, iqn, lunid] = uri.path.split("/")
     return (target, iqn, lunid)
 
 def zoneInLUN(dbg, uri):
@@ -162,6 +263,14 @@ def zoneInLUN(dbg, uri):
             [username, password] = target[0:atindex].split('%')
             target = target[atindex+1:]
 
+        if iqn == None:
+            targetMap = discoverIQN(dbg, target, usechap, username, password)
+            print_iqn_entries(targetMap)
+            # FIXME: Suppress backtrace in a better way
+            sys.tracebacklimit=0
+            raise xapi.storage.api.volume.Unimplemented(
+                  "Uri is missing the target IQN field: %s" % uri)
+             
         configureISCSIDaemon(dbg)
 
         current_sessions = listSessions(dbg)
