@@ -30,7 +30,7 @@ def create(dbg, sr, name, description, size, cb):
     meta_path = cb.volumeMetadataGetPath(opq)
     vol_uuid = str(uuid.uuid4())
 
-    conn = sqlite3.connect(meta_path)
+    conn = connectSQLite3(meta_path)
     res = conn.execute("insert into VDI(snap, name, description, uuid, vsize) values (?, ?, ?, ?, ?)", 
                        (0, name, description, vol_uuid, str(vsize)))
     vol_name = str(res.lastrowid)
@@ -71,7 +71,7 @@ def destroy(dbg, sr, key, cb):
     cb.volumeDestroy(opq, key)
     meta_path = cb.volumeMetadataGetPath(opq)
 
-    conn = sqlite3.connect(meta_path)
+    conn = connectSQLite3(meta_path)
     res = conn.execute("delete from VDI where rowid = (?)", (int(key),))
     conn.commit()
     conn.close()
@@ -84,7 +84,7 @@ def clone(dbg, sr, key, cb):
     meta_path = cb.volumeMetadataGetPath(opq)
     key_path = cb.volumeGetPath(opq, key)
 
-    conn = sqlite3.connect(meta_path)
+    conn = connectSQLite3(meta_path)
     res = conn.execute("select name,parent,description,uuid,vsize from VDI where rowid = (?)",
                        (int(key),)).fetchall()
     (p_name, p_parent, p_desc, p_uuid, p_vsize) = res[0]
@@ -153,7 +153,7 @@ def stat(dbg, sr, key, cb):
     opq = cb.volumeStartOperations(sr, 'r')
     meta_path = cb.volumeMetadataGetPath(opq)
 
-    conn = sqlite3.connect(meta_path)
+    conn = connectSQLite3(meta_path)
     res = conn.execute("select name,description,uuid,vsize from VDI where rowid = (?)", 
                        (int(key),)).fetchall()
     conn.commit()
@@ -181,7 +181,7 @@ def ls(dbg, sr, cb):
     opq = cb.volumeStartOperations(sr, 'r')
     meta_path = cb.volumeMetadataGetPath(opq)
 
-    conn = sqlite3.connect(meta_path)
+    conn = connectSQLite3(meta_path)
 
     res = conn.execute("select key,name,description,uuid,vsize from VDI where key not in (select parent from VDI where parent NOT NULL group by parent)").fetchall()
     
@@ -221,7 +221,7 @@ def set_property(dbg, sr, key, field, value, cb):
     opq = cb.volumeStartOperations(sr, 'w')
     meta_path = cb.volumeMetadataGetPath(opq)
     
-    conn = sqlite3.connect(meta_path)
+    conn = connectSQLite3(meta_path)
     query = ("update VDI set %s = (?) where rowid = (?)" % field)
     res = conn.execute(query, (value, int(key),) )
 
@@ -258,7 +258,7 @@ def activate(dbg, uri, domain, cb):
     vol_path = cb.volumeGetPath(opq, name)
     meta_path = cb.volumeMetadataGetPath(opq)
 
-    conn = sqlite3.connect(meta_path)
+    conn = connectSQLite3(meta_path)
     res = conn.execute("update VDI set active_on = (?) where rowid = (?)",
                        (platform.node(), int(name),) )
 
@@ -276,7 +276,7 @@ def deactivate(dbg, uri, domain, cb):
     vol_path = cb.volumeGetPath(opq, name)
     meta_path = cb.volumeMetadataGetPath(opq)
 
-    conn = sqlite3.connect(meta_path)
+    conn = connectSQLite3(meta_path)
     res = conn.execute("update VDI set active_on = (?) where rowid = (?)",
                        ("", int(name),) )
 
@@ -344,3 +344,5 @@ def forget_tapdisk(dbg, uri):
     except:
         pass
         
+def connectSQLite3(db):
+    return sqlite3.connect(db, timeout=3600, isolation_level="DEFERRED")
