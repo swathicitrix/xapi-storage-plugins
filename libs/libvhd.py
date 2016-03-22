@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+import contextlib
 import uuid
 import sqlite3
 import os
@@ -12,6 +13,7 @@ import xapi.storage.api.datapath
 import xapi.storage.api.volume
 from xapi.storage.libs import tapdisk, image
 import pickle
+from contextlib import contextmanager
 
 TD_PROC_METADATA_DIR = "/var/run/nonpersistent/dp-tapdisk"
 TD_PROC_METADATA_FILE = "meta.pickle"
@@ -31,27 +33,27 @@ def create(dbg, sr, name, description, size, cb):
     vol_uuid = str(uuid.uuid4())
 
     conn = connectSQLite3(meta_path)
-    res = conn.execute("insert into VDI(snap, name, description, uuid, vsize) values (?, ?, ?, ?, ?)", 
-                       (0, name, description, vol_uuid, str(vsize)))
-    vol_name = str(res.lastrowid)
+    with write_context(conn):
+        res = conn.execute("insert into VDI(snap, name, description, uuid, vsize) values (?, ?, ?, ?, ?)", 
+                           (0, name, description, vol_uuid, str(vsize)))
+        vol_name = str(res.lastrowid)
 
-    vol_path = cb.volumeCreate(opq, vol_name, size)
-    cb.volumeActivateLocal(opq, vol_name)
+        vol_path = cb.volumeCreate(opq, vol_name, size)
+        cb.volumeActivateLocal(opq, vol_name)
 
-    # Create the VHD
-    cmd = ["/usr/bin/vhd-util", "create", "-n", vol_path,
-           "-s", str(size_mib)]
-    call(dbg, cmd)
+        # Create the VHD
+        cmd = ["/usr/bin/vhd-util", "create", "-n", vol_path,
+               "-s", str(size_mib)]
+        call(dbg, cmd)
 
-    cb.volumeDeactivateLocal(opq, vol_name)
+        cb.volumeDeactivateLocal(opq, vol_name)
 
-    # Fetch physical utilisation
-    psize = cb.volumeGetPhysSize(opq, vol_name)
+        # Fetch physical utilisation
+        psize = cb.volumeGetPhysSize(opq, vol_name)
 
-    vol_uri = cb.getVolumeURI(opq, vol_name)
-    cb.volumeStopOperations(opq)
+        vol_uri = cb.getVolumeURI(opq, vol_name)
+        cb.volumeStopOperations(opq)
 
-    conn.commit()
     conn.close()
 
     return {
@@ -72,8 +74,8 @@ def destroy(dbg, sr, key, cb):
     meta_path = cb.volumeMetadataGetPath(opq)
 
     conn = connectSQLite3(meta_path)
-    res = conn.execute("delete from VDI where rowid = (?)", (int(key),))
-    conn.commit()
+    with write_context(conn):
+        res = conn.execute("delete from VDI where rowid = (?)", (int(key),))
     conn.close()
     cb.volumeStopOperations(opq)
 
@@ -85,53 +87,55 @@ def clone(dbg, sr, key, cb):
     key_path = cb.volumeGetPath(opq, key)
 
     conn = connectSQLite3(meta_path)
-    res = conn.execute("select name,parent,description,uuid,vsize from VDI where rowid = (?)",
-                       (int(key),)).fetchall()
-    (p_name, p_parent, p_desc, p_uuid, p_vsize) = res[0]
+    with write_context(conn):
+        res = conn.execute("select name,parent,description,uuid,vsize from VDI where rowid = (?)",
+                           (int(key),)).fetchall()
+        (p_name, p_parent, p_desc, p_uuid, p_vsize) = res[0]
     
-    res = conn.execute("insert into VDI(snap, parent, name, description, uuid, vsize) values (?, ?, ?, ?, ?, ?)", 
-                       (0, int(key), p_name, p_desc, snap_uuid, p_vsize))
-    snap_name = str(res.lastrowid)
-    snap_path = cb.volumeCreate(opq, snap_name, int(p_vsize))
-
-    # Snapshot from key
-    cmd = ["/usr/bin/vhd-util", "snapshot",
-               "-n", snap_path, "-p", key_path]
-    output = call(dbg, cmd)
-    
-    # NB. As an optimisation, "vhd-util snapshot A->B" will check if
-    #     "A" is empty. If it is, it will set "B.parent" to "A.parent"
-    #     instead of "A" (provided "A" has a parent) and we are done.
-    #     If "B.parent" still points to "A", we need to rebase "A".
-    
-    # Fetch the parent of the newly created snapshot
-    cmd = ["/usr/bin/vhd-util", "query", "-n", snap_path, "-p"]
-    stdout = call(dbg, cmd)
-    parent_key = os.path.basename(stdout.rstrip())
-
-    if parent_key[-12:] == key[-12:]:
-        log.debug("%s: Volume.snapshot: parent_key == key" % (dbg))
-        xapi.storage.libs.poolhelper.suspend_datapath_in_pool(dbg, key_path)
-        res = conn.execute("insert into VDI(snap, parent) values (?, ?)",
-                           (0, p_parent))
-        base_name = str(res.lastrowid)
-        base_path = cb.volumeRename(opq, key, base_name)
-        cb.volumeCreate(opq, key, int(p_vsize))
-
-        cmd = ["/usr/bin/vhd-util", "snapshot",
-               "-n", key_path, "-p", base_path]
-        output = call(dbg, cmd)
-
-        # Finally, update the snapshot parent to the rebased volume
-        cmd = ["/usr/bin/vhd-util", "modify",
-               "-n", snap_path, "-p", base_path]
-        output = call(dbg, cmd)
-        res = conn.execute("update VDI set parent = (?) where rowid = (?)",
-                           (int(base_name), int(snap_name),) )
+        res = conn.execute("insert into VDI(snap, parent, name, description, uuid, vsize) values (?, ?, ?, ?, ?, ?)", 
+                           (0, int(key), p_name, p_desc, snap_uuid, p_vsize))
+        snap_name = str(res.lastrowid)
+        snap_path = cb.volumeCreate(opq, snap_name, int(p_vsize))
         
-        xapi.storage.libs.poolhelper.resume_datapath_in_pool(dbg, key_path)
+        # Snapshot from key
+        cmd = ["/usr/bin/vhd-util", "snapshot",
+               "-n", snap_path, "-p", key_path]
+        output = call(dbg, cmd)
+    
+        # NB. As an optimisation, "vhd-util snapshot A->B" will check if
+        #     "A" is empty. If it is, it will set "B.parent" to "A.parent"
+        #     instead of "A" (provided "A" has a parent) and we are done.
+        #     If "B.parent" still points to "A", we need to rebase "A".
+    
+        # Fetch the parent of the newly created snapshot
+        cmd = ["/usr/bin/vhd-util", "query", "-n", snap_path, "-p"]
+        stdout = call(dbg, cmd)
+        parent_key = os.path.basename(stdout.rstrip())
 
-    conn.commit()
+        if parent_key[-12:] == key[-12:]:
+            log.debug("%s: Volume.snapshot: parent_key == key" % (dbg))
+            xapi.storage.libs.poolhelper.suspend_datapath_in_pool(dbg, key_path)
+            res = conn.execute("insert into VDI(snap, parent) values (?, ?)",
+                               (0, p_parent))
+            base_name = str(res.lastrowid)
+            base_path = cb.volumeRename(opq, key, base_name)
+            cb.volumeCreate(opq, key, int(p_vsize))
+
+            cmd = ["/usr/bin/vhd-util", "snapshot",
+                   "-n", key_path, "-p", base_path]
+            output = call(dbg, cmd)
+
+            # Finally, update the snapshot parent to the rebased volume
+            cmd = ["/usr/bin/vhd-util", "modify",
+                   "-n", snap_path, "-p", base_path]
+            output = call(dbg, cmd)
+            res = conn.execute("update VDI set parent = (?) where rowid = (?)",
+                               (int(base_name), int(snap_name),) )
+            res = conn.execute("update VDI set parent = (?) where rowid = (?)",
+                               (int(base_name), int(key),) )
+        
+            xapi.storage.libs.poolhelper.resume_datapath_in_pool(dbg, key_path)
+
     conn.close()
     psize = cb.volumeGetPhysSize(opq, snap_name)
     snap_uri = cb.getVolumeURI(opq, snap_name)
@@ -156,7 +160,6 @@ def stat(dbg, sr, key, cb):
     conn = connectSQLite3(meta_path)
     res = conn.execute("select name,description,uuid,vsize from VDI where rowid = (?)", 
                        (int(key),)).fetchall()
-    conn.commit()
     conn.close()
 
     (name,desc,uuid,vsize) = res[0]
@@ -182,8 +185,8 @@ def ls(dbg, sr, cb):
     meta_path = cb.volumeMetadataGetPath(opq)
 
     conn = connectSQLite3(meta_path)
-
     res = conn.execute("select key,name,description,uuid,vsize from VDI where key not in (select parent from VDI where parent NOT NULL group by parent)").fetchall()
+    conn.close()
     
     for (key_int,name,desc,uuid,vsize) in res:
         key = str(key_int)
@@ -222,10 +225,10 @@ def set_property(dbg, sr, key, field, value, cb):
     meta_path = cb.volumeMetadataGetPath(opq)
     
     conn = connectSQLite3(meta_path)
-    query = ("update VDI set %s = (?) where rowid = (?)" % field)
-    res = conn.execute(query, (value, int(key),) )
-
-    conn.commit()
+    with write_context(conn):
+        # Danger, danger. Where does field come from? SQL Injection risk!
+        query = ("update VDI set %s = (?) where rowid = (?)" % field)
+        res = conn.execute(query, (value, int(key),) )
     conn.close()
     cb.volumeStopOperations(opq)
 
@@ -259,15 +262,15 @@ def activate(dbg, uri, domain, cb):
     meta_path = cb.volumeMetadataGetPath(opq)
 
     conn = connectSQLite3(meta_path)
-    res = conn.execute("update VDI set active_on = (?) where rowid = (?)",
-                       (platform.node(), int(name),) )
+    with write_context(conn):
+        res = conn.execute("update VDI set active_on = (?) where rowid = (?)",
+                           (platform.node(), int(name),) )
 
-    img = image.Vhd(vol_path)
-    tap = load_tapdisk(dbg, vol_path)
-    tap.open(dbg, img)
-    save_tapdisk(dbg, vol_path, tap)
+        img = image.Vhd(vol_path)
+        tap = load_tapdisk(dbg, vol_path)
+        tap.open(dbg, img)
+        save_tapdisk(dbg, vol_path, tap)
 
-    conn.commit()
     conn.close()
     
 def deactivate(dbg, uri, domain, cb):
@@ -277,13 +280,13 @@ def deactivate(dbg, uri, domain, cb):
     meta_path = cb.volumeMetadataGetPath(opq)
 
     conn = connectSQLite3(meta_path)
-    res = conn.execute("update VDI set active_on = (?) where rowid = (?)",
-                       ("", int(name),) )
+    with write_context(conn):
+        res = conn.execute("update VDI set active_on = (?) where rowid = (?)",
+                           ("", int(name),) )
 
-    tap = load_tapdisk(dbg, vol_path)
-    tap.close(dbg)
+        tap = load_tapdisk(dbg, vol_path)
+        tap.close(dbg)
 
-    conn.commit()
     conn.close()
 
 def detach(dbg, uri, domain, cb):
@@ -345,4 +348,13 @@ def forget_tapdisk(dbg, uri):
         pass
         
 def connectSQLite3(db):
-    return sqlite3.connect(db, timeout=3600, isolation_level="DEFERRED")
+    return sqlite3.connect(db, timeout=3600, isolation_level=None)
+
+@contextmanager
+def write_context(conn):
+    with conn:
+        conn.execute('PRAGMA journal_mode=wal')
+        yield
+        conn.execute('PRAGMA wal_checkpoint=FULL')
+
+

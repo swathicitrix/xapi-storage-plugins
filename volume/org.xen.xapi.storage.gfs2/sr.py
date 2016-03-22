@@ -218,10 +218,11 @@ class Implementation(xapi.storage.api.volume.SR_skeleton):
         # create metadata DB
         import sqlite3
         conn = sqlite3.connect(mnt_path + "/sqlite3-metadata.db")
-        conn.execute("create table VDI(key integer primary key, snap int,"
-                     "parent int, name text, description text, vsize text,"
-                     "uuid text, active_on text)")
-        conn.commit()
+        with conn:
+            conn.execute("create table VDI(key integer primary key, snap int,"
+                         "parent int, name text, description text, vsize text,"
+                         "uuid text, active_on text)")
+            # TODO: define indexes, parent, uuid, (active_on?)
         conn.close()
 
         read_caching = True
