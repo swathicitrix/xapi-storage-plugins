@@ -309,13 +309,13 @@ def epcclose(dbg, uri, cb):
     return None
 
 def connectSQLite3(db):
-    return sqlite3.connect(db, timeout=3600, isolation_level=None)
+    return sqlite3.connect(db, timeout=3600, isolation_level="DEFERRED")
 
 @contextmanager
 def write_context(conn):
     with conn:
-        conn.execute('PRAGMA journal_mode=wal')
+        #conn.execute('PRAGMA journal_mode=wal')
         yield
-        conn.execute('PRAGMA wal_checkpoint=FULL')
+        #conn.execute('PRAGMA wal_checkpoint=FULL')
 
 
