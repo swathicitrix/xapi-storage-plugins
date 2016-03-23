@@ -151,8 +151,6 @@ def sync_leaf_coalesce(key, parent_key, conn, cb, opq):
     base_path = cb.volumeRename(opq, parent_key, key)
 
     res = conn.execute("delete from VDI where rowid = (?)", (int(parent_key),))
-#    res = conn.execute("update VDI set parent = (?) where rowid = (?)",
-#                       (int(p_parent), int(key),) )
     res = conn.execute("update VDI set parent = (?) where rowid = (?)",
                        (p_parent, int(key),) )
     conn.commit()

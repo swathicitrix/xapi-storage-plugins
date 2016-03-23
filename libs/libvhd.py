@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 
-import contextlib
 import uuid
 import sqlite3
 import os
@@ -12,11 +11,8 @@ import xapi.storage.libs.poolhelper
 import xapi.storage.api.datapath
 import xapi.storage.api.volume
 from xapi.storage.libs import tapdisk, image
-import pickle
 from contextlib import contextmanager
 
-TD_PROC_METADATA_DIR = "/var/run/nonpersistent/dp-tapdisk"
-TD_PROC_METADATA_FILE = "meta.pickle"
 DP_URI_PREFIX = "vhd+tapdisk://"
 
 def create(dbg, sr, name, description, size, cb):
@@ -248,7 +244,7 @@ def attach(dbg, uri, domain, cb):
     # activate LVs chain here
     vol_path = cb.volumeGetPath(opq, name)
     tap = tapdisk.create(dbg)
-    save_tapdisk(dbg, vol_path, tap)
+    tapdisk.save_tapdisk_metadata(dbg, vol_path, tap)
     return {
         'domain_uuid': '0',
         'implementation': ['Tapdisk3', tap.block_device()],
@@ -267,9 +263,9 @@ def activate(dbg, uri, domain, cb):
                            (platform.node(), int(name),) )
 
         img = image.Vhd(vol_path)
-        tap = load_tapdisk(dbg, vol_path)
+        tap = tapdisk.load_tapdisk_metadata(dbg, vol_path)
         tap.open(dbg, img)
-        save_tapdisk(dbg, vol_path, tap)
+        tapdisk.save_tapdisk_metadata(dbg, vol_path, tap)
 
     conn.close()
     
@@ -284,7 +280,7 @@ def deactivate(dbg, uri, domain, cb):
         res = conn.execute("update VDI set active_on = (?) where rowid = (?)",
                            ("", int(name),) )
 
-        tap = load_tapdisk(dbg, vol_path)
+        tap = tapdisk.load_tapdisk_metadata(dbg, vol_path)
         tap.close(dbg)
 
     conn.close()
@@ -294,9 +290,9 @@ def detach(dbg, uri, domain, cb):
     opq = cb.volumeStartOperations(sr, 'r')
     # deactivate LVs chain here
     vol_path = cb.volumeGetPath(opq, name)
-    tap = load_tapdisk(dbg, vol_path)
+    tap = tapdisk.load_tapdisk_metadata(dbg, vol_path)
     tap.destroy(dbg)
-    forget_tapdisk(dbg, vol_path)
+    tapdisk.forget_tapdisk_metadata(dbg, vol_path)
 
 def epcopen(dbg, uri, persistent, cb):
     u = urlparse.urlparse(uri)
@@ -312,41 +308,6 @@ def epcclose(dbg, uri, cb):
         raise xapi.storage.api.volume.Volume_does_not_exist(u.path)
     return None
 
-def _metadata_dir(uri):
-    return TD_PROC_METADATA_DIR + "/" + uri
-
-def save_tapdisk(dbg, uri, tap):
-    """ Record the tapdisk metadata for this URI in host-local storage """
-    dirname = _metadata_dir(uri)
-    try:
-        os.makedirs(dirname, mode=0755)
-    except OSError as e:
-        if e.errno != 17:  # 17 == EEXIST, which is harmless
-            raise e
-    with open(dirname + "/" + TD_PROC_METADATA_FILE, "w") as fd:
-        pickle.dump(tap.__dict__, fd)
-
-def load_tapdisk(dbg, uri):
-    """Recover the tapdisk metadata for this URI from host-local
-    storage."""
-    dirname = _metadata_dir(uri)
-    if not(os.path.exists(dirname)):
-        # XXX throw a better exception
-        raise xapi.storage.api.volume.Volume_does_not_exist(dirname)
-    with open(dirname + "/" + TD_PROC_METADATA_FILE, "r") as fd:
-        meta = pickle.load(fd)
-        tap = tapdisk.Tapdisk(meta['minor'], meta['pid'], meta['f'])
-        tap.secondary = meta['secondary']
-        return tap
-
-def forget_tapdisk(dbg, uri):
-    """Delete the tapdisk metadata for this URI from host-local storage."""
-    dirname = _metadata_dir(uri)
-    try:
-        os.unlink(dirname + "/" + TD_PROC_METADATA_FILE)
-    except:
-        pass
-        
 def connectSQLite3(db):
     return sqlite3.connect(db, timeout=3600, isolation_level=None)
 

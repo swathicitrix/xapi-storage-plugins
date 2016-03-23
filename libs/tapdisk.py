@@ -8,7 +8,11 @@ import signal
 
 import xapi
 import image
+import xapi.storage.api.volume
 from xapi.storage.common import call
+from xapi.storage import log
+import pickle
+import urlparse
 
 # Use Xen tapdisk to create block devices from files
 
@@ -16,6 +20,9 @@ blktap2_prefix = "/dev/xen/blktap-2/tapdev"
 
 nbdclient_prefix = "/var/run/blktap-control/nbdclient"
 nbdserver_prefix = "/var/run/blktap-control/nbdserver"
+
+TD_PROC_METADATA_DIR = "/var/run/nonpersistent/dp-tapdisk"
+TD_PROC_METADATA_FILE = "meta.pickle"
 
 
 class Tapdisk:
@@ -25,6 +32,9 @@ class Tapdisk:
         self.pid = pid
         self.f = f
         self.secondary = None  # mirror destination
+
+    def __repr__(self):
+        return "Tapdisk(%s, %s, %s)" % (self.minor, self.pid, self.f)
 
     def destroy(self, dbg):
         self.pause(dbg)
@@ -46,10 +56,13 @@ class Tapdisk:
               str(self.pid)])
         self.f = None
 
-    def open(self, dbg, f):
+    def open(self, dbg, f, o_direct=True):
         assert (isinstance(f, image.Vhd) or isinstance(f, image.Raw))
-        call(dbg, ["tap-ctl", "open", "-m", str(self.minor),
-                   "-p", str(self.pid), "-a", str(f)])
+        args = ["tap-ctl", "open", "-m", str(self.minor),
+                   "-p", str(self.pid), "-a", str(f)]
+        if not o_direct:
+            args.append("-D")
+        call(dbg, args)
         self.f = f
 
     def pause(self, dbg):
@@ -116,41 +129,52 @@ def create(dbg):
     return Tapdisk(minor, pid, None)
 
 
-def list(dbg):
-    results = []
-    for line in call(dbg, ["tap-ctl", "list"]).split("\n"):
-        bits = line.split()
-        if bits == []:
-            continue
-        prefix = "pid="
-        pid = None
-        if bits[0].startswith(prefix):
-            pid = int(bits[0][len(prefix):])
-        minor = None
-        prefix = "minor="
-        if len(bits) <= 1:
-            results.append(Tapdisk(None, pid, None))
-            continue
-        if bits[1].startswith(prefix):
-            minor = int(bits[1][len(prefix):])
-        if len(bits) <= 3:
-            results.append(Tapdisk(minor, pid, None))
-        else:
-            before, args = line.split("args=")
-            prefix = "aio:"
-            if args.startswith(prefix):
-                this = image.Raw(os.path.realpath(args[len(prefix):]))
-                results.append(Tapdisk(minor, pid, this))
-            prefix = "vhd:"
-            if args.startswith(prefix):
-                this = image.Vhd(os.path.realpath(args[len(prefix):]))
-                results.append(Tapdisk(minor, pid, this))
-    return results
-
-
 def find_by_file(dbg, f):
+    log.debug("%s: find_by_file f=%s" % (dbg, f))
     assert (isinstance(f, image.Path))
-    path = os.path.realpath(f.path)
-    for tapdisk in list(dbg):
-        if tapdisk.f is not None and tapdisk.f.path == path:
-            return tapdisk
+    # See whether this host has any metadata about this file
+    try:
+        log.debug("%s: find_by_file trying uri=%s" % (dbg, f.path))
+        tap = load_tapdisk_metadata(dbg, f.path)
+        log.debug("%s: returning td %s" % (dbg, tap))
+        return tap
+    except xapi.storage.api.volume.Volume_does_not_exist:
+        pass
+
+def _metadata_dir(path):
+    return TD_PROC_METADATA_DIR + "/" + os.path.realpath(path)
+
+def save_tapdisk_metadata(dbg, path, tap):
+    """ Record the tapdisk metadata for this VDI in host-local storage """
+    dirname = _metadata_dir(path)
+    try:
+        os.makedirs(dirname, mode=0755)
+    except OSError as e:
+        if e.errno != 17:  # 17 == EEXIST, which is harmless
+            raise e
+    with open(dirname + "/" + TD_PROC_METADATA_FILE, "w") as fd:
+        pickle.dump(tap.__dict__, fd)
+
+def load_tapdisk_metadata(dbg, path):
+    """Recover the tapdisk metadata for this VDI from host-local
+       storage."""
+    dirname = _metadata_dir(path)
+    log.debug("%s: load_tapdisk_metadata: trying '%s'" % (dbg, dirname))
+    filename = dirname + "/" + TD_PROC_METADATA_FILE
+    if not(os.path.exists(filename)):
+        # XXX throw a better exception
+        raise xapi.storage.api.volume.Volume_does_not_exist(dirname)
+    with open(filename, "r") as fd:
+        meta = pickle.load(fd)
+        tap = Tapdisk(meta['minor'], meta['pid'], meta['f'])
+        tap.secondary = meta['secondary']
+        return tap
+
+def forget_tapdisk_metadata(dbg, path):
+    """Delete the tapdisk metadata for this VDI from host-local storage."""
+    dirname = _metadata_dir(path)
+    try:
+        os.unlink(dirname + "/" + TD_PROC_METADATA_FILE)
+    except:
+        pass
+
