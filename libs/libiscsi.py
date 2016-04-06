@@ -12,10 +12,73 @@ import xapi.storage.libs.poolhelper
 import xcp.environ
 import XenAPI
 import socket
-import iscsi
+import scsiutil
 import xml.dom.minidom
 
 DEFAULT_PORT = 3260
+
+def print_lun_entries(map):
+    dom = xml.dom.minidom.Document()
+    element = dom.createElement("iscsi-target")
+    dom.appendChild(element)
+    for LUNid, vendor, serial, size, SCSIid in map:
+        entry = dom.createElement('LUN')
+        element.appendChild(entry)
+
+        subentry = dom.createElement('Vendor')
+        entry.appendChild(subentry)
+        textnode = dom.createTextNode(vendor)
+        subentry.appendChild(textnode)
+
+        subentry = dom.createElement('Serial')
+        entry.appendChild(subentry)
+        textnode = dom.createTextNode(serial)
+        subentry.appendChild(textnode)
+
+        subentry = dom.createElement('LUN')
+        entry.appendChild(subentry)
+        textnode = dom.createTextNode(LUNid)
+        subentry.appendChild(textnode)
+
+        subentry = dom.createElement('size')
+        entry.appendChild(subentry)
+        textnode = dom.createTextNode(str(size))
+        subentry.appendChild(textnode)
+
+        subentry = dom.createElement('SCSIid')
+        entry.appendChild(subentry)
+        textnode = dom.createTextNode(SCSIid)
+        subentry.appendChild(textnode)
+
+    print >>sys.stderr,dom.toprettyxml()
+
+
+def queryLUN(dbg, path, id):
+    vendor = scsiutil.getmanufacturer(dbg, path)
+    serial = scsiutil.getserial(dbg, path)
+    size = scsiutil.getsize(dbg, path)
+    SCSIid = scsiutil.getSCSIid(dbg, path)
+    return (id, vendor, serial, size, SCSIid)
+
+
+# This function takes an ISCSI device and populate it with
+# a dictionary of available LUNs on that target.
+def discoverLuns(dbg, path):
+    lunMap = []
+    if os.path.exists(path):
+        # FIXME: Don't display dom0 disks
+        # dom0_disks = util.dom0_disks()
+        for file in os.listdir(path):
+            if file.find("LUN") != -1 and file.find("_") == -1:
+                lun_path = os.path.join(path,file)
+                # FIXME: Don't display dom0 disks
+                #if os.path.realpath(vdi_path) in dom0_disks:
+                #    util.SMlog("Hide dom0 boot disk LUN")
+                #else:
+                LUNid = file.replace("LUN","")
+                lunMap.append(queryLUN(dbg, lun_path, LUNid))
+    return lunMap
+
 
 #FIXME: Review function
 def print_iqn_entries(map):
@@ -67,7 +130,6 @@ def parse_node_output(text):
 
 def discoverIQN(dbg, target, usechap=False, username=None, password=None, 
                 interfaceArray=["default"]):
-
     """Run iscsiadm in discovery mode to obtain a list of the 
     TargetIQNs available on the specified target and port. Returns
     a list of triples - the portal (ip:port), the tpgt (target portal
@@ -238,12 +300,18 @@ def decomposeISCSIuri(dbg, uri):
 
     if uri.netloc:  
     	target = uri.netloc
-    if uri.path:
-    	[null, iqn, lunid] = uri.path.split("/")
+    if uri.path and '/' in uri.path:
+        tokens = uri.path.split("/")
+        if tokens[1] != '':
+            iqn = tokens[1]
+        if len(tokens) > 2 and tokens[2] != '': 
+            lunid = tokens[2]
+
     return (target, iqn, lunid)
 
 def zoneInLUN(dbg, uri):
     log.debug("%s: zoneInLUN uri=%s" % (dbg, uri))
+
 
     u = urlparse.urlparse(uri)
     if u.scheme == 'iscsi':
@@ -263,15 +331,15 @@ def zoneInLUN(dbg, uri):
             [username, password] = target[0:atindex].split('%')
             target = target[atindex+1:]
 
+        configureISCSIDaemon(dbg)
+
         if iqn == None:
             targetMap = discoverIQN(dbg, target, usechap, username, password)
             print_iqn_entries(targetMap)
             # FIXME: Suppress backtrace in a better way
             sys.tracebacklimit=0
             raise xapi.storage.api.volume.Unimplemented(
-                  "Uri is missing the target IQN field: %s" % uri)
-             
-        configureISCSIDaemon(dbg)
+                  "Uri is missing target IQN information: %s" % uri)
 
         current_sessions = listSessions(dbg)
         log.debug("%s: current iSCSI sessions are %s" % (dbg, current_sessions))
@@ -290,6 +358,16 @@ def zoneInLUN(dbg, uri):
             login(dbg, target, iqn, usechap, username, password)
 
         waitForDevice(dbg)
+
+        if lunid == None:
+            target_path = "/dev/iscsi/%s/%s:3260" % (iqn, target)
+            lunMap = discoverLuns(dbg, target_path)
+            print_lun_entries(lunMap)
+            # FIXME: Suppress backtrace in a better way
+            sys.tracebacklimit=0
+            raise xapi.storage.api.volume.Unimplemented(
+                  "Uri is missing LUN information: %s" % uri)
+
         dev_path = "/dev/iscsi/%s/%s:3260/LUN%s" % (iqn, target, lunid)
     else:
         # FIXME: raise some sort of exception
