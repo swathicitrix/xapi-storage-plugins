@@ -21,8 +21,6 @@
 import os
 import fcntl
 import subprocess
-import re
-import netaddr
 import XenAPIPlugin
 
 
@@ -57,19 +55,10 @@ def testCorosync():
         return True
     return False
 
-def getNetworkId():
-    out = call(["/usr/sbin/ip", "addr", "show", "xenbr0"])
-    for line in out.splitlines():
-        net_match = re.match("^\s*inet (\S*)\s.*$", line)
-        if net_match:
-             return netaddr.IPNetwork(net_match.group(1)).network
-
 def setupCorosync(session, pool_uuid):
     sysconfigdlm = open("/etc/sysconfig/dlm", "w")
     sysconfigdlm.write("DLM_CONTROLD_OPTS=\"--enable_fencing=0 --enable_quorum_fencing=0 -K\"\n")
     sysconfigdlm.close()
-
-    call(["/usr/sbin/modprobe", "gfs2"])
 
     conf = """totem {
   version: 2
@@ -78,34 +67,29 @@ def setupCorosync(session, pool_uuid):
   transport: udpu
   token_retransmits_before_loss_const: 10
   token: 10000
-  interface {
-    # Rings must be consecutively numbered, starting at 0.
-    ringnumber: 0
-    # This is normally the *network* address of the
-    # interface to bind to. This ensures that you can use
-    # identical instances of this configuration file
-    # across all your cluster nodes, without having to
-    # modify this option.
-    bindnetaddr: %s
-  }
-
 }
 
 logging {
   debug: on
+  to_logfile: yes
+  logfile: /var/log/corosync.log
+  to_syslog: yes
 }
 
 quorum {
   provider: corosync_votequorum
 }
 
-nodelist {""" % (pool_uuid, getNetworkId())
+nodelist {""" % (pool_uuid)
 
+    node_id=1
     for host in session.xenapi.host.get_all():
         conf += """
   node {
     ring0_addr: %s
-  }""" % session.xenapi.host.get_address(host)
+    nodeid: %s
+  }""" % (session.xenapi.host.get_address(host), node_id)
+        node_id += 1
 
     conf += """
 }
@@ -121,10 +105,13 @@ nodelist {""" % (pool_uuid, getNetworkId())
         call(["/usr/bin/systemctl", "start", "corosync"])
     else:
         call(["/usr/sbin/corosync-cfgtool", "-R"])
+
     if call(["/usr/bin/systemctl", "is-enabled", "dlm"]) != "enabled":
         call(["/usr/bin/systemctl", "enable", "dlm"])
     if call(["/usr/bin/systemctl", "is-active", "dlm"]) != "active":
         call(["/usr/bin/systemctl", "start", "dlm"])
+
+    call(["/usr/sbin/modprobe", "gfs2"])
 
     return True
 
