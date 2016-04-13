@@ -60,6 +60,8 @@ def setupCorosync(session, pool_uuid):
     sysconfigdlm.write("DLM_CONTROLD_OPTS=\"--enable_fencing=0 --enable_quorum_fencing=0 -K\"\n")
     sysconfigdlm.close()
 
+    call(["/usr/sbin/modprobe", "dlm"])
+
     conf = """totem {
   version: 2
   secauth: off
