@@ -165,7 +165,7 @@ class Implementation(xapi.storage.api.volume.SR_skeleton):
         # this_host will reload last
         log.debug("%s: refresh host %s" % (dbg, session.xenapi.host.get_name_label(this_host)))
         session.xenapi.host.call_plugin(
-            host, "gfs2setup", "gfs2Reload", {})
+            this_host, "gfs2setup", "gfs2Reload", {})
 
         # Zone in the LUN on this host
         dev_path = plug_device(dbg, uri)
