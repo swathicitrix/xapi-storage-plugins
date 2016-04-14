@@ -48,20 +48,7 @@ def call(cmd_args):
     stdout, stderr = p.communicate()
     return stdout.rstrip()
 
-
-def testCorosync():
-    out = call(["/usr/bin/systemctl", "is-active", "dlm"])
-    if out == "active":
-        return True
-    return False
-
-def setupCorosync(session, pool_uuid):
-    sysconfigdlm = open("/etc/sysconfig/dlm", "w")
-    sysconfigdlm.write("DLM_CONTROLD_OPTS=\"--enable_fencing=0 --enable_quorum_fencing=0 -K\"\n")
-    sysconfigdlm.close()
-
-    call(["/usr/sbin/modprobe", "dlm"])
-
+def updateConfCorosync(session, pool_uuid):
     conf = """totem {
   version: 2
   secauth: off
@@ -98,6 +85,13 @@ nodelist {""" % (pool_uuid)
     coroconf.write(conf)
     coroconf.close()
 
+def reloadCorosync(session, pool_uuid):
+    sysconfigdlm = open("/etc/sysconfig/dlm", "w")
+    sysconfigdlm.write("DLM_CONTROLD_OPTS=\"--enable_fencing=0 --enable_quorum_fencing=0 -K\"\n")
+    sysconfigdlm.close()
+
+    call(["/usr/sbin/modprobe", "dlm"])
+
     if call(["/usr/bin/systemctl", "is-enabled", "corosync"]) != "enabled":
         call(["/usr/bin/systemctl", "enable", "corosync"])
     if call(["/usr/bin/systemctl", "is-active", "corosync"]) != "active":
@@ -115,13 +109,13 @@ nodelist {""" % (pool_uuid)
     return True
 
 
-def gfs2Setup(session, args):
+def gfs2UpdateConf(session, args):
     pool = session.xenapi.pool.get_all()[0]
     pool_uuid = session.xenapi.pool.get_uuid(pool)
     cluster_name = pool_uuid[:8]
 
     with gfs2PluginLock():
-        if testCorosync() or setupCorosync(session, cluster_name):
+        if updateConfCorosync(session, cluster_name):
             return str(cluster_name)
 
     return ""
@@ -133,13 +127,18 @@ def gfs2Reload(session, args):
     cluster_name = pool_uuid[:8]
 
     with gfs2PluginLock():
-        if setupCorosync(session, cluster_name):
+        if reloadCorosync(session, cluster_name):
             return str(cluster_name)
 
     return ""
 
+def gfs2Test(session, args):
+    out = call(["/usr/bin/systemctl", "is-active", "dlm"])
+    if out == "active":
+        return True
+    return False
 
 if __name__ == "__main__":
     XenAPIPlugin.dispatch({
-        "gfs2Setup": gfs2Setup,
+        "gfs2UpdateConf": gfs2UpdateConf,
         "gfs2Reload": gfs2Reload})

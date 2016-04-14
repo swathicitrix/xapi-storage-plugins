@@ -75,15 +75,7 @@ def sanitise_name(dbg, name):
     return sanitised
 
 def mount(dbg, dev_path):
-    # Ensure corosync+dlm are configured and running
-    inventory = xcp.environ.readInventory()
-    session = XenAPI.xapi_local()
-    session.xenapi.login_with_password("root", "")
-    this_host = session.xenapi.host.get_by_uuid(
-        inventory.get("INSTALLATION_UUID"))
-    log.debug("%s: setting up corosync and dlm on this host" % (dbg))
-    session.xenapi.host.call_plugin(
-        this_host, "gfs2setup", "gfs2Setup", {})
+    # FIXME: Ensure corosync+dlm are configured and running
 
     mnt_path = os.path.abspath(mountpoint_root + dev_path)
     try:
@@ -160,10 +152,20 @@ class Implementation(xapi.storage.api.volume.SR_skeleton):
         # FIXME: Do not notify offline hosts
         # FIXME: See ffs.call_plugin_in_pool()
         for host in session.xenapi.host.get_all():
+            log.debug("%s: refresh host %s config file" % (dbg, session.xenapi.host.get_name_label(host)))
+            session.xenapi.host.call_plugin(
+                host, "gfs2setup", "gfs2UpdateConf", {})
+
+        for host in session.xenapi.host.get_all():
             if host != this_host:
-                log.debug("%s: notifying host %s we have arrived" % (dbg, session.xenapi.host.get_name_label(host)))
+                log.debug("%s: setup host %s" % (dbg, session.xenapi.host.get_name_label(host)))
                 session.xenapi.host.call_plugin(
                     host, "gfs2setup", "gfs2Reload", {})
+
+        # this_host will reload last
+        log.debug("%s: refresh host %s" % (dbg, session.xenapi.host.get_name_label(this_host)))
+        session.xenapi.host.call_plugin(
+            host, "gfs2setup", "gfs2Reload", {})
 
         # Zone in the LUN on this host
         dev_path = plug_device(dbg, uri)
