@@ -84,14 +84,11 @@ quorum {
 
 nodelist {""" % (pool_uuid)
 
-    node_id=1
     for host in session.xenapi.host.get_all():
         conf += """
   node {
     ring0_addr: %s
-    nodeid: %s
-  }""" % (session.xenapi.host.get_address(host), node_id)
-        node_id += 1
+  }""" % session.xenapi.host.get_address(host)
 
     conf += """
 }
