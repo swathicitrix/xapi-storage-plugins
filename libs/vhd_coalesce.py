@@ -55,11 +55,19 @@ def find_leaves(key, conn, leaf_accumulator):
 
 def tap_ctl_pause(key, conn, cb, opq):
     key_path = cb.volumeGetPath(opq, key)
-    xapi.storage.libs.poolhelper.suspend_datapath_in_pool("GC", key_path)
+    res = conn.execute("select active_on from VDI where key = ?", (int(key),)).fetchall()
+    active_on = res[0][0]
+    print("Key %s active on %s" % (key, active_on))
+    if active_on != "None":
+        xapi.storage.libs.poolhelper.suspend_datapath_on_host("GC", active_on, key_path)
 
 def tap_ctl_unpause(key, conn, cb, opq):
     key_path = cb.volumeGetPath(opq, key)
-    xapi.storage.libs.poolhelper.resume_datapath_in_pool("GC", key_path)    
+    res = conn.execute("select active_on from VDI where key = ?", (int(key),)).fetchall()
+    active_on = res[0][0]
+    print("Key %s active on %s" % (key, active_on))
+    if active_on != "None":
+        xapi.storage.libs.poolhelper.resume_datapath_on_host("GC", active_on, key_path)
 
 def leaf_coalesce_snapshot(key, conn, cb, opq):
     print ("leaf_coalesce_snapshot key=%s" % key)
@@ -99,27 +107,29 @@ def non_leaf_coalesce(key, parent_key, conn, cb, opq):
 
     # reparent all of the children to this node's parent
     children = conn.execute("select key from VDI where parent = (?)",(int(key),)).fetchall()
-    for child in children:
-        child_key = str(child[0])
-        child_path = cb.volumeGetPath(opq, child_key)
-        res = conn.execute("update VDI set parent = (?) where rowid = (?)",
-                           (parent_key, child_key,) )
 
-        #conn.execute("child is being reparented to parent")
+    with libvhd.Lock(opq, "gl", cb):
+        for child in children:
+            child_key = str(child[0])
+            child_path = cb.volumeGetPath(opq, child_key)
+            res = conn.execute("update VDI set parent = (?) where rowid = (?)",
+                               (parent_key, child_key,) )
 
-        # pause all leafs having child as an ancestor
-        leaves = []
-        find_leaves(child_key, conn, leaves)
-        for leaf in leaves:
-            tap_ctl_pause(leaf, conn, cb, opq)
+            #conn.execute("child is being reparented to parent")
 
-        # reparent child to grandparent
-        cmd = ["/usr/bin/vhd-util", "modify", "-n", child_path, "-p", parent_path]
-        call("GC", cmd)
+            # pause all leafs having child as an ancestor
+            leaves = []
+            find_leaves(child_key, conn, leaves)
+            for leaf in leaves:
+                tap_ctl_pause(leaf, conn, cb, opq)
 
-        # unpause all leafs having child as an ancestor
-        for leaf in leaves:
-            tap_ctl_unpause(leaf, conn, cb, opq)
+            # reparent child to grandparent
+            cmd = ["/usr/bin/vhd-util", "modify", "-n", child_path, "-p", parent_path]
+            call("GC", cmd)
+
+            # unpause all leafs having child as an ancestor
+            for leaf in leaves:
+                tap_ctl_unpause(leaf, conn, cb, opq)
 
     # remove key
     cb.volumeDestroy(opq, key)

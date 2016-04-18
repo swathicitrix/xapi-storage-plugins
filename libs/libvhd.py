@@ -13,6 +13,10 @@ import xapi.storage.api.volume
 from xapi.storage.libs import tapdisk, image
 from contextlib import contextmanager
 
+#FIXME: these should go since are a layering violation
+import xcp.environ
+import XenAPI
+
 DP_URI_PREFIX = "vhd+tapdisk://"
 
 def create(dbg, sr, name, description, size, cb):
@@ -110,27 +114,33 @@ def clone(dbg, sr, key, cb):
 
         if parent_key[-12:] == key[-12:]:
             log.debug("%s: Volume.snapshot: parent_key == key" % (dbg))
-            xapi.storage.libs.poolhelper.suspend_datapath_in_pool(dbg, key_path)
-            res = conn.execute("insert into VDI(snap, parent) values (?, ?)",
-                               (0, p_parent))
-            base_name = str(res.lastrowid)
-            base_path = cb.volumeRename(opq, key, base_name)
-            cb.volumeCreate(opq, key, int(p_vsize))
+            
+            with Lock(opq, "gl", cb):
+                res = conn.execute("select active_on from VDI where key = ?", (int(key),)).fetchall()
+                active_on = res[0][0]
+                if active_on != "None": 
+                    xapi.storage.libs.poolhelper.suspend_datapath_on_host(dbg, active_on, key_path)
+                res = conn.execute("insert into VDI(snap, parent) values (?, ?)",
+                                   (0, p_parent))
+                base_name = str(res.lastrowid)
+                base_path = cb.volumeRename(opq, key, base_name)
+                cb.volumeCreate(opq, key, int(p_vsize))
 
-            cmd = ["/usr/bin/vhd-util", "snapshot",
-                   "-n", key_path, "-p", base_path]
-            output = call(dbg, cmd)
+                cmd = ["/usr/bin/vhd-util", "snapshot",
+                       "-n", key_path, "-p", base_path]
+                output = call(dbg, cmd)
 
-            # Finally, update the snapshot parent to the rebased volume
-            cmd = ["/usr/bin/vhd-util", "modify",
-                   "-n", snap_path, "-p", base_path]
-            output = call(dbg, cmd)
-            res = conn.execute("update VDI set parent = (?) where rowid = (?)",
-                               (int(base_name), int(snap_name),) )
-            res = conn.execute("update VDI set parent = (?) where rowid = (?)",
-                               (int(base_name), int(key),) )
+                # Finally, update the snapshot parent to the rebased volume
+                cmd = ["/usr/bin/vhd-util", "modify",
+                       "-n", snap_path, "-p", base_path]
+                output = call(dbg, cmd)
+                res = conn.execute("update VDI set parent = (?) where rowid = (?)",
+                                   (int(base_name), int(snap_name),) )
+                res = conn.execute("update VDI set parent = (?) where rowid = (?)",
+                                   (int(base_name), int(key),) )
         
-            xapi.storage.libs.poolhelper.resume_datapath_in_pool(dbg, key_path)
+                if active_on != "None": 
+                    xapi.storage.libs.poolhelper.resume_datapath_on_host(dbg, active_on, key_path)
 
     conn.close()
     psize = cb.volumeGetPhysSize(opq, snap_name)
@@ -251,23 +261,29 @@ def attach(dbg, uri, domain, cb):
         }
 
 def activate(dbg, uri, domain, cb):
-    import platform
+    inventory = xcp.environ.readInventory()
+    session = XenAPI.xapi_local()
+    session.xenapi.login_with_password("root", "")
+    this_host = session.xenapi.host.get_by_uuid(inventory.get("INSTALLATION_UUID"))
+    this_host_label = session.xenapi.host.get_name_label(this_host)
+
     sr,name = parse_datapath_uri(uri)
     opq = cb.volumeStartOperations(sr, 'w')
     vol_path = cb.volumeGetPath(opq, name)
     meta_path = cb.volumeMetadataGetPath(opq)
 
-    conn = connectSQLite3(meta_path)
-    with write_context(conn):
-        res = conn.execute("update VDI set active_on = (?) where rowid = (?)",
-                           (platform.node(), int(name),) )
+    with Lock(opq, "gl", cb):
+        conn = connectSQLite3(meta_path)
+        with write_context(conn):
+            res = conn.execute("update VDI set active_on = (?) where rowid = (?)",
+                               (this_host_label, int(name),) )
 
-        img = image.Vhd(vol_path)
-        tap = tapdisk.load_tapdisk_metadata(dbg, vol_path)
-        tap.open(dbg, img)
-        tapdisk.save_tapdisk_metadata(dbg, vol_path, tap)
+            img = image.Vhd(vol_path)
+            tap = tapdisk.load_tapdisk_metadata(dbg, vol_path)
+            tap.open(dbg, img)
+            tapdisk.save_tapdisk_metadata(dbg, vol_path, tap)
 
-    conn.close()
+        conn.close()
     
 def deactivate(dbg, uri, domain, cb):
     sr,name = parse_datapath_uri(uri)
@@ -276,14 +292,15 @@ def deactivate(dbg, uri, domain, cb):
     meta_path = cb.volumeMetadataGetPath(opq)
 
     conn = connectSQLite3(meta_path)
-    with write_context(conn):
-        res = conn.execute("update VDI set active_on = (?) where rowid = (?)",
-                           ("", int(name),) )
+    with Lock(opq, "gl", cb):
+        with write_context(conn):
+            res = conn.execute("update VDI set active_on = (?) where rowid = (?)",
+                               ("", int(name),) )
 
-        tap = tapdisk.load_tapdisk_metadata(dbg, vol_path)
-        tap.close(dbg)
+            tap = tapdisk.load_tapdisk_metadata(dbg, vol_path)
+            tap.close(dbg)
 
-    conn.close()
+        conn.close()
 
 def detach(dbg, uri, domain, cb):
     sr,name = parse_datapath_uri(uri)
@@ -318,4 +335,14 @@ def write_context(conn):
         yield
         #conn.execute('PRAGMA wal_checkpoint=FULL')
 
+class Lock():
+    def __init__(self, opq, name, cb):
+        self.opq = opq
+        self.name = name
+        self.cb = cb
 
+    def __enter__(self):
+        self.lock = self.cb.volumeLock(self.opq, self.name)
+
+    def __exit__(self, type, value, traceback):
+        return self.cb.volumeUnlock(self.opq, self.lock)

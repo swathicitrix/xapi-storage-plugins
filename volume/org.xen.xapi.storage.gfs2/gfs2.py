@@ -1,6 +1,7 @@
 import urlparse
 import errno
 import os
+import fcntl
 from xapi.storage import log
 
 class Callbacks():
@@ -59,3 +60,13 @@ class Callbacks():
         return os.path.join(opq, "sqlite3-metadata.db")
     def getVolumeURI(self, opq, name):
         return "gfs2/" + opq + "|" + name
+    def volumeLock(self, opq, name):
+        log.debug("volumeLock opq=%s name=%s" % (opq, name))
+        vol_path = os.path.join(opq, name)
+        lock = open(name, 'w+')
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        return lock
+    def volumeUnlock(self, opq, lock):
+        log.debug("volumeUnlock opq=%s" % opq)
+        fcntl.flock(lock, fcntl.LOCK_UN)
+        lock.close
