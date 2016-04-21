@@ -3,6 +3,7 @@
 import importlib
 import os
 import sys
+import time
 from xapi.storage import log
 from xapi.storage.libs import libvhd
 from xapi.storage.common import call
@@ -24,15 +25,16 @@ def get_all_nodes(conn):
     return rows
 
 def find_non_leaf_coalesceable(conn):
-    results = conn.execute("select * from (select key, parent, count(key) as num from VDI where parent not null group by parent)t where t.num=1 and key in ( select parent from vdi where parent not null group by parent)")
+    results = conn.execute("select * from (select key, parent, gc_status, count(key) as num from VDI where parent not null group by parent)t where t.num=1 and key in ( select parent from vdi where parent not null group by parent)")
     rows = results.fetchall()
     for row in rows:
         print row
-    print ("Found %s non leaf coalescable nodes" % len(rows))
+    if len(rows) > 0:
+        print ("Found %s non leaf coalescable nodes" % len(rows))
     return rows
 
 def find_leaf_coalesceable(conn):
-    results = conn.execute("select * from (select key, parent, count(key) as num from VDI where parent not null group by parent)t where t.num=1 and key not in ( select parent from vdi where parent not null group by parent)")
+    results = conn.execute("select * from (select key, parent, gc_status, count(key) as num from VDI where parent not null group by parent)t where t.num=1 and key not in ( select parent from vdi where parent not null group by parent)")
     rows = results.fetchall()
     for row in rows:
         print row
@@ -43,11 +45,11 @@ def find_leaves(key, conn, leaf_accumulator):
     leaf_results = conn.execute("select key from VDI where parent = ?", (int(key),))
 
     children = leaf_results.fetchall()
-    print children
+    # print children
 
     if len(children) == 0:
         # This is a leaf add it to list
-        print("Found leaf %s" % key)
+        # print("Found leaf %s" % key)
         leaf_accumulator.append(key)
     else:
         for child in children:
@@ -57,16 +59,16 @@ def tap_ctl_pause(key, conn, cb, opq):
     key_path = cb.volumeGetPath(opq, key)
     res = conn.execute("select active_on from VDI where key = ?", (int(key),)).fetchall()
     active_on = res[0][0]
-    print("Key %s active on %s" % (key, active_on))
-    if active_on != "None":
+    if active_on:
+        print("SS Key %s active on %s" % (key, active_on))
         xapi.storage.libs.poolhelper.suspend_datapath_on_host("GC", active_on, key_path)
 
 def tap_ctl_unpause(key, conn, cb, opq):
     key_path = cb.volumeGetPath(opq, key)
     res = conn.execute("select active_on from VDI where key = ?", (int(key),)).fetchall()
     active_on = res[0][0]
-    print("Key %s active on %s" % (key, active_on))
-    if active_on != "None":
+    if active_on:
+        print("SS Key %s active on %s" % (key, active_on))
         xapi.storage.libs.poolhelper.resume_datapath_on_host("GC", active_on, key_path)
 
 def leaf_coalesce_snapshot(key, conn, cb, opq):
@@ -100,15 +102,17 @@ def non_leaf_coalesce(key, parent_key, conn, cb, opq):
     key_path = cb.volumeGetPath(opq, key)
     parent_path = cb.volumeGetPath(opq, parent_key)
 
+    print("Running vhd-coalesce on %s" % key)
     cmd = ["/usr/bin/vhd-util", "coalesce", "-n", key_path]
     call("GC", cmd)
 
     #conn.execute("key coalesced")
 
-    # reparent all of the children to this node's parent
-    children = conn.execute("select key from VDI where parent = (?)",(int(key),)).fetchall()
-
     with libvhd.Lock(opq, "gl", cb):
+        # reparent all of the children to this node's parent
+        children = conn.execute("select key from VDI where parent = (?)",
+                                (int(key),)).fetchall()
+        # print("List of childrens: %s" % children)
         for child in children:
             child_key = str(child[0])
             child_path = cb.volumeGetPath(opq, child_key)
@@ -120,22 +124,30 @@ def non_leaf_coalesce(key, parent_key, conn, cb, opq):
             # pause all leafs having child as an ancestor
             leaves = []
             find_leaves(child_key, conn, leaves)
+            print("Children %s: pausing all leafes: %s" % (child_key,leaves))
             for leaf in leaves:
                 tap_ctl_pause(leaf, conn, cb, opq)
 
             # reparent child to grandparent
+            print("Reparenting %s to %s" % (child_key, parent_key))
             cmd = ["/usr/bin/vhd-util", "modify", "-n", child_path, "-p", parent_path]
             call("GC", cmd)
 
             # unpause all leafs having child as an ancestor
+            print("Children %s: unpausing all leafes: %s" % (child_key,leaves))
             for leaf in leaves:
                 tap_ctl_unpause(leaf, conn, cb, opq)
 
-    # remove key
-    cb.volumeDestroy(opq, key)
+        # remove key
+        print("Destroy %s" % key)
+        cb.volumeDestroy(opq, key)
+        res = conn.execute("delete from VDI where rowid = (?)", (int(key),))
 
-    res = conn.execute("delete from VDI where rowid = (?)", (int(key),))
-    conn.commit()
+        print("Setting gc_status to None for %s" % parent_key)
+        conn.execute("update VDI set gc_status = (?) where rowid = (?)",
+                     (None, parent_key,) )
+
+        conn.commit()
 
 def sync_leaf_coalesce(key, parent_key, conn, cb, opq):
     print ("leaf_coalesce_snapshot key=%s" % key)
@@ -178,6 +190,22 @@ def leaf_coalesce(key, parent_key, conn, cb, opq):
 def find_best_non_leaf_coalesceable(rows):
     return str(rows[0][0]), str(rows[0][1])
 
+def find_best_non_leaf_coalesceable_2(conn, cb, opq):
+    with libvhd.Lock(opq, "gl", cb):
+        rows = find_non_leaf_coalesceable(conn)
+        for row in rows:
+            if not row["gc_status"]:
+                parent_rows = conn.execute("select gc_status from VDI where key = (?)",
+                                (int(row["parent"]),)).fetchall()
+                if not parent_rows[0]["gc_status"]:
+                    conn.execute("update VDI set gc_status = (?) where rowid = (?)",
+                                 ("Coalescing", row["key"],) )
+                    conn.execute("update VDI set gc_status = (?) where rowid = (?)",
+                                 ("Coalescing", row["parent"],) )
+                    conn.commit()
+                    return str(row["key"]), str(row["parent"]),
+    return "None", "None"
+
 def run_coalesce(sr_type, uri):
     cb = get_sr_callbacks(sr_type)
     opq = cb.volumeStartOperations(uri, 'w')
@@ -188,12 +216,11 @@ def run_coalesce(sr_type, uri):
     get_all_nodes(conn)
 
     while True:
-        rows = find_non_leaf_coalesceable(conn)
-        if rows:
-            key, parent_key = find_best_non_leaf_coalesceable(rows)
+        key, parent_key = find_best_non_leaf_coalesceable_2(conn, cb, opq)
+        if (key, parent_key) != ("None", "None"):
             non_leaf_coalesce(key, parent_key, conn, cb, opq)
         else:
-            break
+            time.sleep(5)
 
     rows = find_leaf_coalesceable(conn)
     if rows:

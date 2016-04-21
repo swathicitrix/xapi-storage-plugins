@@ -70,13 +70,14 @@ def create(dbg, sr, name, description, size, cb):
 
 def destroy(dbg, sr, key, cb):
     opq = cb.volumeStartOperations(sr, 'w')
-    cb.volumeDestroy(opq, key)
     meta_path = cb.volumeMetadataGetPath(opq)
 
     conn = connectSQLite3(meta_path)
-    with write_context(conn):
-        res = conn.execute("delete from VDI where rowid = (?)", (int(key),))
-    conn.close()
+    with Lock(opq, "gl", cb):
+        with write_context(conn):
+            cb.volumeDestroy(opq, key)
+            res = conn.execute("delete from VDI where rowid = (?)", (int(key),))
+        conn.close()
     cb.volumeStopOperations(opq)
 
 def clone(dbg, sr, key, cb):
@@ -118,7 +119,7 @@ def clone(dbg, sr, key, cb):
             with Lock(opq, "gl", cb):
                 res = conn.execute("select active_on from VDI where key = ?", (int(key),)).fetchall()
                 active_on = res[0][0]
-                if active_on != "None": 
+                if active_on: 
                     xapi.storage.libs.poolhelper.suspend_datapath_on_host(dbg, active_on, key_path)
                 res = conn.execute("insert into VDI(snap, parent) values (?, ?)",
                                    (0, p_parent))
@@ -139,7 +140,7 @@ def clone(dbg, sr, key, cb):
                 res = conn.execute("update VDI set parent = (?) where rowid = (?)",
                                    (int(base_name), int(key),) )
         
-                if active_on != "None": 
+                if active_on: 
                     xapi.storage.libs.poolhelper.resume_datapath_on_host(dbg, active_on, key_path)
 
     conn.close()
@@ -295,7 +296,7 @@ def deactivate(dbg, uri, domain, cb):
     with Lock(opq, "gl", cb):
         with write_context(conn):
             res = conn.execute("update VDI set active_on = (?) where rowid = (?)",
-                               ("", int(name),) )
+                               (None, int(name),) )
 
             tap = tapdisk.load_tapdisk_metadata(dbg, vol_path)
             tap.close(dbg)
@@ -326,7 +327,9 @@ def epcclose(dbg, uri, cb):
     return None
 
 def connectSQLite3(db):
-    return sqlite3.connect(db, timeout=3600, isolation_level="DEFERRED")
+    conn = sqlite3.connect(db, timeout=3600, isolation_level="DEFERRED")
+    conn.row_factory = sqlite3.Row
+    return conn
 
 @contextmanager
 def write_context(conn):
