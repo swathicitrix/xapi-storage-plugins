@@ -23,8 +23,8 @@ def getSRpath(dbg, sr, check=True):
     uri = urlparse.urlparse(sr)
 
     if uri.scheme == 'iscsi':
-        (target, iqn, lunid) = libiscsi.decomposeISCSIuri(dbg, uri)
-        sr_path = "/dev/iscsi/%s/%s:3260/LUN%s" % (iqn, target, lunid)
+        (target, iqn, scsiid) = libiscsi.decomposeISCSIuri(dbg, uri)
+        sr_path = "/dev/disk/by-id/scsi-%s" % scsiid
     else:
         sr_path = uri.path
 

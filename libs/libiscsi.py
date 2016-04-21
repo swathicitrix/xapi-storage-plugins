@@ -292,11 +292,11 @@ def decomposeISCSIuri(dbg, uri):
     if (uri.scheme != "iscsi"):
         raise xapi.storage.api.volume.SR_does_not_exist(
               "The SR URI is invalid; please use \
-               iscsi://<target>/<targetIQN>/<lun>")
+               iscsi://<target>/<targetIQN>/<scsiID>")
 
     target = None
     iqn = None
-    lunid = None
+    scsiid = None
 
     if uri.netloc:  
     	target = uri.netloc
@@ -305,9 +305,9 @@ def decomposeISCSIuri(dbg, uri):
         if tokens[1] != '':
             iqn = tokens[1]
         if len(tokens) > 2 and tokens[2] != '': 
-            lunid = tokens[2]
+            scsiid = tokens[2]
 
-    return (target, iqn, lunid)
+    return (target, iqn, scsiid)
 
 def zoneInLUN(dbg, uri):
     log.debug("%s: zoneInLUN uri=%s" % (dbg, uri))
@@ -316,9 +316,9 @@ def zoneInLUN(dbg, uri):
     u = urlparse.urlparse(uri)
     if u.scheme == 'iscsi':
         log.debug("%s: u = %s" % (dbg, u))
-        (target, iqn, lunid) = decomposeISCSIuri(dbg, u)
-        log.debug("%s: target = '%s', iqn = '%s', lunid = '%s'" % 
-                  (dbg, target, iqn, lunid))
+        (target, iqn, scsiid) = decomposeISCSIuri(dbg, u)
+        log.debug("%s: target = '%s', iqn = '%s', scsiid = '%s'" % 
+                  (dbg, target, iqn, scsiid))
 
         # If there's authentication required, the target will be i
         # of the form 'username%password@12.34.56.78'
@@ -359,7 +359,7 @@ def zoneInLUN(dbg, uri):
 
         waitForDevice(dbg)
 
-        if lunid == None:
+        if scsiid == None:
             target_path = "/dev/iscsi/%s/%s:3260" % (iqn, target)
             lunMap = discoverLuns(dbg, target_path)
             print_lun_entries(lunMap)
@@ -368,7 +368,7 @@ def zoneInLUN(dbg, uri):
             raise xapi.storage.api.volume.Unimplemented(
                   "Uri is missing LUN information: %s" % uri)
 
-        dev_path = "/dev/iscsi/%s/%s:3260/LUN%s" % (iqn, target, lunid)
+        dev_path = "/dev/disk/by-id/scsi-%s" % scsiid
     else:
         # FIXME: raise some sort of exception
         raise xapi.storage.api.volume.Unimplemented(
@@ -393,7 +393,7 @@ def zoneOutLUN(dbg, uri):
     u = urlparse.urlparse(uri)
     log.debug("%s: u = %s" % (dbg, u))
     if u.scheme == 'iscsi':
-        (target, iqn, lunid) = decomposeISCSIuri(dbg, u)
+        (target, iqn, scsiid) = decomposeISCSIuri(dbg, u)
         log.debug("%s: iqn = %s" % (dbg, iqn))
 
         cmd = ["/usr/sbin/iscsiadm", "-m", "node", "-T", iqn, "-u"]
