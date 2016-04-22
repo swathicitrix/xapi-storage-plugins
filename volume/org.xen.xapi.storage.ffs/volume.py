@@ -8,6 +8,7 @@ import os
 import os.path
 import subprocess
 import sys
+import ffs
 import xapi.storage.api.volume
 from xapi.storage import log
 import xapi.storage.libs.poolhelper
@@ -91,7 +92,7 @@ class Implementation(xapi.storage.api.volume.Volume_skeleton):
             "read_write": True,
             "virtual_size": size,
             "physical_utilisation": 0,
-            "uri": ["raw+file://" + new_name],
+            "uri": [DP_URI_PREFIX + new_name],
             "keys": {}
         }
 
@@ -164,7 +165,7 @@ class Implementation(xapi.storage.api.volume.Volume_skeleton):
             "read_write": True,
             "virtual_size": virtual_size,
             "physical_utilisation": physical_utilisation,
-            "uri": ["raw+file://" + path],
+            "uri": [DP_URI_PREFIX + path],
             "keys": {},
         }
 
@@ -353,7 +354,7 @@ class Implementation(xapi.storage.api.volume.Volume_skeleton):
             "read_write": True,
             "virtual_size": size,
             "physical_utilisation": 0,
-            "uri": ["raw+file://" + new_name],
+            "uri": [DP_URI_PREFIX + new_name],
             "keys": {}
         }
 
@@ -386,7 +387,7 @@ class Implementation(xapi.storage.api.volume.Volume_skeleton):
             "read_write": True,
             "virtual_size": virtual_size,
             "physical_utilisation": physical_utilisation,
-            "uri": ["raw+file://" + path],
+            "uri": [DP_URI_PREFIX + path],
             "keys": keys
         }
 

@@ -5,8 +5,10 @@ import os
 import os.path
 import sys
 import urlparse
+import ffs
 import xapi.storage.api.volume
 from xapi.storage import log
+
 
 
 class Implementation(xapi.storage.api.volume.SR_skeleton):
@@ -65,7 +67,7 @@ class Implementation(xapi.storage.api.volume.SR_skeleton):
                 "read_write": True,
                 "virtual_size": virtual_size,
                 "physical_utilisation": physical_utilisation,
-                "uri": ["raw+file:///" + path],
+                "uri": [DP_URI_PREFIX + "/" + path],
                 "keys": keys
             })
         return results
@@ -106,3 +108,4 @@ if __name__ == "__main__":
         cmd.stat()
     else:
         raise xapi.storage.api.volume.Unimplemented(base)
+
