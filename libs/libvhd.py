@@ -88,35 +88,35 @@ def clone(dbg, sr, key, cb):
     key_path = cb.volumeGetPath(opq, key)
 
     conn = connectSQLite3(meta_path)
-    with write_context(conn):
-        res = conn.execute("select name,parent,description,uuid,vsize from VDI where rowid = (?)",
-                           (int(key),)).fetchall()
-        (p_name, p_parent, p_desc, p_uuid, p_vsize) = res[0]
-    
-        res = conn.execute("insert into VDI(snap, parent, name, description, uuid, vsize) values (?, ?, ?, ?, ?, ?)", 
-                           (0, int(key), p_name, p_desc, snap_uuid, p_vsize))
-        snap_name = str(res.lastrowid)
-        snap_path = cb.volumeCreate(opq, snap_name, int(p_vsize))
-        
-        # Snapshot from key
-        cmd = ["/usr/bin/vhd-util", "snapshot",
-               "-n", snap_path, "-p", key_path]
-        output = call(dbg, cmd)
-    
-        # NB. As an optimisation, "vhd-util snapshot A->B" will check if
-        #     "A" is empty. If it is, it will set "B.parent" to "A.parent"
-        #     instead of "A" (provided "A" has a parent) and we are done.
-        #     If "B.parent" still points to "A", we need to rebase "A".
-    
-        # Fetch the parent of the newly created snapshot
-        cmd = ["/usr/bin/vhd-util", "query", "-n", snap_path, "-p"]
-        stdout = call(dbg, cmd)
-        parent_key = os.path.basename(stdout.rstrip())
+    with Lock(opq, "gl", cb):
+        with write_context(conn):
+            res = conn.execute("select name,parent,description,uuid,vsize from VDI where rowid = (?)",
+                               (int(key),)).fetchall()
+            (p_name, p_parent, p_desc, p_uuid, p_vsize) = res[0]
 
-        if parent_key[-12:] == key[-12:]:
-            log.debug("%s: Volume.snapshot: parent_key == key" % (dbg))
+            res = conn.execute("insert into VDI(snap, parent, name, description, uuid, vsize) values (?, ?, ?, ?, ?, ?)", 
+                               (0, int(key), p_name, p_desc, snap_uuid, p_vsize))
+            snap_name = str(res.lastrowid)
+            snap_path = cb.volumeCreate(opq, snap_name, int(p_vsize))
+        
+            # Snapshot from key
+            cmd = ["/usr/bin/vhd-util", "snapshot",
+                   "-n", snap_path, "-p", key_path]
+            output = call(dbg, cmd)
+    
+            # NB. As an optimisation, "vhd-util snapshot A->B" will check if
+            #     "A" is empty. If it is, it will set "B.parent" to "A.parent"
+            #     instead of "A" (provided "A" has a parent) and we are done.
+            #     If "B.parent" still points to "A", we need to rebase "A".
+    
+            # Fetch the parent of the newly created snapshot
+            cmd = ["/usr/bin/vhd-util", "query", "-n", snap_path, "-p"]
+            stdout = call(dbg, cmd)
+            parent_key = os.path.basename(stdout.rstrip())
+
+            if parent_key[-12:] == key[-12:]:
+                log.debug("%s: Volume.snapshot: parent_key == key" % (dbg))
             
-            with Lock(opq, "gl", cb):
                 res = conn.execute("select active_on from VDI where key = ?", (int(key),)).fetchall()
                 active_on = res[0][0]
                 if active_on: 
@@ -334,9 +334,7 @@ def connectSQLite3(db):
 @contextmanager
 def write_context(conn):
     with conn:
-        #conn.execute('PRAGMA journal_mode=wal')
         yield
-        #conn.execute('PRAGMA wal_checkpoint=FULL')
 
 class Lock():
     def __init__(self, opq, name, cb):

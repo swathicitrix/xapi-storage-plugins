@@ -55,6 +55,15 @@ def find_leaves(key, conn, leaf_accumulator):
         for child in children:
             find_leaves(str(child[0]), conn, leaf_accumulator)
 
+def find_root_node(key, conn):
+    res = conn.execute("select parent from VDI where rowid = ?", (int(key),)).fetchall()
+    parent = res[0]["parent"]
+    if parent == None:
+        print("Found root node %s" % key)
+        return key
+    else:
+        return find_root_node(parent, conn)
+
 def tap_ctl_pause(key, conn, cb, opq):
     key_path = cb.volumeGetPath(opq, key)
     res = conn.execute("select active_on from VDI where key = ?", (int(key),)).fetchall()
@@ -96,9 +105,13 @@ def leaf_coalesce_snapshot(key, conn, cb, opq):
 
     tap_ctl_unpause(key, conn, cb, opq)
 
-def non_leaf_coalesce(key, parent_key, conn, cb, opq):
+def non_leaf_coalesce(key, parent_key, uri, cb):
     print ("non_leaf_coalesce key=%s, parent=%s" % (key, parent_key))
     #conn.execute("key is coalescing")
+
+    opq = cb.volumeStartOperations(uri, 'w')
+    meta_path = cb.volumeMetadataGetPath(opq)
+
     key_path = cb.volumeGetPath(opq, key)
     parent_path = cb.volumeGetPath(opq, parent_key)
 
@@ -108,6 +121,7 @@ def non_leaf_coalesce(key, parent_key, conn, cb, opq):
 
     #conn.execute("key coalesced")
 
+    conn = libvhd.connectSQLite3(meta_path)
     with libvhd.Lock(opq, "gl", cb):
         # reparent all of the children to this node's parent
         children = conn.execute("select key from VDI where parent = (?)",
@@ -116,10 +130,6 @@ def non_leaf_coalesce(key, parent_key, conn, cb, opq):
         for child in children:
             child_key = str(child[0])
             child_path = cb.volumeGetPath(opq, child_key)
-            res = conn.execute("update VDI set parent = (?) where rowid = (?)",
-                               (parent_key, child_key,) )
-
-            #conn.execute("child is being reparented to parent")
 
             # pause all leafs having child as an ancestor
             leaves = []
@@ -130,24 +140,31 @@ def non_leaf_coalesce(key, parent_key, conn, cb, opq):
 
             # reparent child to grandparent
             print("Reparenting %s to %s" % (child_key, parent_key))
+            res = conn.execute("update VDI set parent = (?) where rowid = (?)",
+                               (parent_key, child_key,) )
             cmd = ["/usr/bin/vhd-util", "modify", "-n", child_path, "-p", parent_path]
             call("GC", cmd)
+
+            conn.commit()
 
             # unpause all leafs having child as an ancestor
             print("Children %s: unpausing all leafes: %s" % (child_key,leaves))
             for leaf in leaves:
                 tap_ctl_unpause(leaf, conn, cb, opq)
 
+        root_node = find_root_node(key, conn)
+        print("Setting gc_status to None root node %s" % root_node)
+        conn.execute("update VDI set gc_status = (?) where rowid = (?)",
+                     (None, int(root_node),) )
+        conn.commit()
+
         # remove key
         print("Destroy %s" % key)
         cb.volumeDestroy(opq, key)
         res = conn.execute("delete from VDI where rowid = (?)", (int(key),))
-
-        print("Setting gc_status to None for %s" % parent_key)
-        conn.execute("update VDI set gc_status = (?) where rowid = (?)",
-                     (None, parent_key,) )
-
         conn.commit()
+
+    conn.close()
 
 def sync_leaf_coalesce(key, parent_key, conn, cb, opq):
     print ("leaf_coalesce_snapshot key=%s" % key)
@@ -190,35 +207,39 @@ def leaf_coalesce(key, parent_key, conn, cb, opq):
 def find_best_non_leaf_coalesceable(rows):
     return str(rows[0][0]), str(rows[0][1])
 
-def find_best_non_leaf_coalesceable_2(conn, cb, opq):
+def find_best_non_leaf_coalesceable_2(uri, cb):
+    opq = cb.volumeStartOperations(uri, 'w')
+    meta_path = cb.volumeMetadataGetPath(opq)
+    conn = libvhd.connectSQLite3(meta_path)
+    ret = ("None", "None")
     with libvhd.Lock(opq, "gl", cb):
         rows = find_non_leaf_coalesceable(conn)
         for row in rows:
+            print row
             if not row["gc_status"]:
-                parent_rows = conn.execute("select gc_status from VDI where key = (?)",
-                                (int(row["parent"]),)).fetchall()
-                if not parent_rows[0]["gc_status"]:
+                root_node = find_root_node(row["key"], conn)
+                root_rows = conn.execute("select gc_status from VDI where key = (?)",
+                                (int(root_node),)).fetchall()
+                if not root_rows[0]["gc_status"]:
                     conn.execute("update VDI set gc_status = (?) where rowid = (?)",
                                  ("Coalescing", row["key"],) )
                     conn.execute("update VDI set gc_status = (?) where rowid = (?)",
-                                 ("Coalescing", row["parent"],) )
+                                 ("Coalescing", int(root_node),) )
                     conn.commit()
-                    return str(row["key"]), str(row["parent"]),
-    return "None", "None"
+                    ret = (str(row["key"]), str(row["parent"]))
+                    break
+    conn.close()
+    cb.volumeStopOperations(opq)
+    return ret
 
 def run_coalesce(sr_type, uri):
     cb = get_sr_callbacks(sr_type)
-    opq = cb.volumeStartOperations(uri, 'w')
-    meta_path = cb.volumeMetadataGetPath(opq)
-    print meta_path
-    conn = libvhd.connectSQLite3(meta_path)
-
-    get_all_nodes(conn)
+    #get_all_nodes(conn)
 
     while True:
-        key, parent_key = find_best_non_leaf_coalesceable_2(conn, cb, opq)
+        key, parent_key = find_best_non_leaf_coalesceable_2(uri, cb)
         if (key, parent_key) != ("None", "None"):
-            non_leaf_coalesce(key, parent_key, conn, cb, opq)
+            non_leaf_coalesce(key, parent_key, uri, cb)
         else:
             time.sleep(5)
 

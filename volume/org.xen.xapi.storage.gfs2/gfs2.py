@@ -63,7 +63,7 @@ class Callbacks():
     def volumeLock(self, opq, name):
         log.debug("volumeLock opq=%s name=%s" % (opq, name))
         vol_path = os.path.join(opq, name)
-        lock = open(name, 'w+')
+        lock = open(vol_path, 'w+')
         fcntl.flock(lock, fcntl.LOCK_EX)
         return lock
     def volumeUnlock(self, opq, lock):
