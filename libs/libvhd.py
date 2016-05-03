@@ -331,6 +331,14 @@ def connectSQLite3(db):
     conn.row_factory = sqlite3.Row
     return conn
 
+def startGC(dbg, sr_name, uri):
+    import vhd_coalesce
+    vhd_coalesce.startGC(dbg, sr_name, uri)
+
+def stopGC(dbg, sr_name, uri):
+    import vhd_coalesce
+    vhd_coalesce.stopGC(dbg, sr_name, uri)
+
 @contextmanager
 def write_context(conn):
     with conn:

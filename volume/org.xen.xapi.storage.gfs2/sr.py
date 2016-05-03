@@ -91,7 +91,10 @@ def mount(dbg, dev_path):
 
         cmd = ["/usr/bin/mount", "-t", "gfs2", "-o",
                "noatime,nodiratime", dev_path, mnt_path]
-        call(dbg, cmd)
+        try:
+            call(dbg, cmd)
+        except:
+            raise
     return mnt_path
 
 def mount_local(dbg, dev_path):
@@ -191,10 +194,14 @@ class Implementation(xapi.storage.api.volume.SR_skeleton):
 
         # Mount the gfs2 filesystem
         mnt_path = mount(dbg, dev_path)
-
         log.debug("%s: mounted on %s" % (dbg, mnt_path))
-        uri = "file://" + mnt_path
-        return uri
+
+        sr = "file://" + mnt_path
+
+        # Start GC for this host
+        libvhd.startGC(dbg, "gfs2", sr)
+
+        return sr
 
     def create(self, dbg, uri, name, description, configuration):
         log.debug("%s: SR.create: uri=%s, config=%s" % (dbg, uri, configuration))
@@ -255,7 +262,7 @@ class Implementation(xapi.storage.api.volume.SR_skeleton):
             "name": name,
             "description": description,
             "uri": uri,
-            "mountpath": mnt_path,
+            "unique_id": mnt_path[18:],
             "fsname": fsname,
             "read_caching": read_caching,
             "keys": {}
@@ -278,6 +285,9 @@ class Implementation(xapi.storage.api.volume.SR_skeleton):
     def detach(self, dbg, sr):
         # Get the iSCSI uri from the SR metadata
         uri = getFromSRMetadata(dbg, sr, 'uri')
+
+        # stop GC
+        libvhd.stopGC(dbg, "gfs2", sr)
 
         # Unmount the FS
         sr_path = getSRpath(dbg, sr)

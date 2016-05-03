@@ -2,6 +2,7 @@ import urlparse
 import errno
 import os
 import fcntl
+import json
 from xapi.storage import log
 
 class Callbacks():
@@ -9,8 +10,20 @@ class Callbacks():
         log.debug("volumeCreate opq=%s name=%s size=%d" % (opq, name, size))
         vol_dir = os.path.join(opq, name)
         vol_path = os.path.join(vol_dir, name)
-        os.makedirs(vol_dir, mode=0755)
-        open(vol_path, 'a').close()
+        try:
+            os.makedirs(vol_dir, mode=0755)
+        except OSError as exc:
+            if exc.errno == errno.EEXIST:
+                pass
+            else:
+                raise
+        try:
+            open(vol_path, 'a').close()
+        except OSError as exc:
+            if exc.errno == errno.EEXIST:
+                pass
+            else:
+                raise
         return vol_path
     def volumeDestroy(self, opq, name):
         log.debug("volumeDestroy opq=%s name=%s" % (opq, name))
@@ -51,15 +64,19 @@ class Callbacks():
         return stat.st_blocks * 512
     def volumeStartOperations(self, sr, mode):
         return urlparse.urlparse(sr).path
-        import sr
-        opq = sr.getSRpath("dbg", sr)
-        return opq
     def volumeStopOperations(self, opq):
         pass
     def volumeMetadataGetPath(self, opq):
         return os.path.join(opq, "sqlite3-metadata.db")
     def getVolumeURI(self, opq, name):
         return "gfs2/" + opq + "|" + name
+    def getUniqueIdentifier(self, opq):
+        log.debug("getUniqueIdentifier opq=%s" % opq)
+        meta_path = os.path.join(opq, "meta.json")
+        with open(meta_path, "r") as fd:
+            meta = json.load(fd)
+            value = meta["unique_id"]
+        return value
     def volumeLock(self, opq, name):
         log.debug("volumeLock opq=%s name=%s" % (opq, name))
         vol_path = os.path.join(opq, name)
