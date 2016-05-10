@@ -10,6 +10,7 @@ import xapi.storage.api.volume
 from xapi.storage.common import call
 from xapi.storage.libs import libvhd
 from xapi.storage.libs import libiscsi
+from xapi.storage.libs import blkinfo
 from xapi.storage import log
 import fcntl
 import json
@@ -19,14 +20,9 @@ import XenAPI
 # For a block device /a/b/c, we will mount it at <mountpoint_root>/a/b/c
 mountpoint_root = "/var/run/sr-mount/"
 
-def getSRpath(dbg, sr, check=True):
-    uri = urlparse.urlparse(sr)
-
-    if uri.scheme == 'iscsi':
-        (target, iqn, scsiid) = libiscsi.decomposeISCSIuri(dbg, uri)
-        sr_path = "/dev/disk/by-id/scsi-%s" % scsiid
-    else:
-        sr_path = uri.path
+def getSRpath(dbg, uri, check=True):
+    dev_path = blkinfo.get_device_path(dbg, uri)
+    sr_path = os.path.abspath(mountpoint_root + dev_path)
 
     if check:
         if not(os.path.isdir(sr_path)) or not(os.path.ismount(sr_path)):
@@ -122,11 +118,10 @@ def plug_device(dbg, uri):
         dev_path = libiscsi.zoneInLUN(dbg, uri)
     else: 
         # Assume it's a local block device
-        dev_path = "/%s%s" % (u.netloc, u.path)
-        # FIXME: Why do we need to check if it is a mount
-        # if not(os.path.exists(dev_path)) or not(os.path.ismount(dev_path)):
-        if not(os.path.exists(dev_path)):
-            raise xapi.storage.api.volume.Sr_not_attached(dev_path)
+        dev_path = blkinfo.get_device_path(dbg, uri)
+
+    if not(os.path.exists(dev_path)):
+        raise xapi.storage.api.volume.Sr_not_attached(dev_path)
     return dev_path
 
 def unplug_device(dbg, uri): 
@@ -141,26 +136,76 @@ def unplug_device(dbg, uri):
 class Implementation(xapi.storage.api.volume.SR_skeleton):
 
     def probe(self, dbg, uri):
-        raise AssertionError("not implemented")
+        srs = []
+        uris = []
 
-        # TODO: Complete implementation
+        u = urlparse.urlparse(uri)
+        if u.scheme == None:
+            raise xapi.storage.api.volume.SR_does_not_exist(
+                  "The SR URI is invalid")
 
-        if iqn == None:
-            targetMap = discoverIQN(dbg, target, usechap, username, password)
-            print_iqn_entries(targetMap)
-            # FIXME: Suppress backtrace in a better way
-            sys.tracebacklimit=0
-            raise xapi.storage.api.volume.Unimplemented(
-                  "Uri is missing target IQN information: %s" % uri)
+        if u.scheme == 'iscsi':
+            object_map = []
+            keys = libiscsi.decomposeISCSIuri(dbg, u)
+            if keys['target'] == None:
+                raise xapi.storage.api.volume.SR_does_not_exist(
+                      "The SR URI is invalid")
+            # uri has target but no IQN information
+            # Return possible URI options by querying 
+            # the target for IQN information
+            if keys['iqn'] == None:
+                iqn_map = libiscsi.discoverIQN(dbg, keys)
+                if len(iqn_map) == 0:
+                    raise xapi.storage.api.volume.SR_does_not_exist(
+                          "No IQNs available at target")
+                for record in iqn_map:
+                    object_map.append(record[2])
+            # uri has target and IQN but no LUN information
+            # Return possible URI options by querying 
+            # the target for LUN information
+            elif keys['scsiid'] == None:
+                try:
+                    target_path = libiscsi.login(dbg, uri, keys)
+                    lun_map = libiscsi.discoverLuns(dbg, target_path)
+                finally: 
+                    libiscsi.logout(dbg, uri, keys['iqn'])
+                if len(lun_map) == 0:
+                    raise xapi.storage.api.volume.SR_does_not_exist(
+                          "No LUNs available at targetIQN")
+                for record in lun_map:
+                    object_map.append(record[4])
+            # URI is complete. Find out if the underlying                
+            # device is formatted using GFS2.
+            else: 
+                try: 
+                    libiscsi.login(dbg, uri, keys)
+                    dev_path = blkinfo.get_device_path(dbg, uri)
+                    if blkinfo.get_format(dbg, dev_path) == "gfs2":
+                        # Check if sr_path needs to be mounted
+                        mnt_path = mount_local(dbg, dev_path)
+                        srs.append(self.stat(dbg, uri))
+                        # Unmount only if we mounted
+                        umount(dbg, mnt_path)
+                finally: 
+                    libiscsi.logout(dbg, uri, keys['iqn'])
+                    
+            if len(object_map):
+                for obj in object_map: 
+                    new_uri = uri + "/" + obj
+                    uris.append(new_uri)
+        else:
+            #HBA transport
+            dev_path = blkinfo.get_device_path(dbg, uri)
+            if blkinfo.get_format(dbg, dev_path) == "gfs2":
+                mnt_path = mount_local(dbg, dev_path)
+                srs.append(self.stat(dbg, uri))
+                umount(dbg, mnt_path)
 
-        if scsiid == None:
-            target_path = "/dev/iscsi/%s/%s:3260" % (iqn, target)
-            lunMap = discoverLuns(dbg, target_path)
-            print_lun_entries(lunMap)
-            # FIXME: Suppress backtrace in a better way
-            sys.tracebacklimit=0
-            raise xapi.storage.api.volume.Unimplemented(
-                  "Uri is missing LUN information: %s" % uri)
+        return {
+            "srs": srs,
+            "uris": uris
+        }
+
 
     def attach(self, dbg, uri):
         log.debug("%s: SR.attach: uri=%s" % (dbg, uri))
@@ -290,7 +335,7 @@ class Implementation(xapi.storage.api.volume.SR_skeleton):
         libvhd.stopGC(dbg, "gfs2", sr)
 
         # Unmount the FS
-        sr_path = getSRpath(dbg, sr)
+        sr_path = getSRpath(dbg, uri)
         umount(dbg, sr_path)
 
         # Unplug device if need be
@@ -302,7 +347,7 @@ class Implementation(xapi.storage.api.volume.SR_skeleton):
 
     def stat(self, dbg, sr):
         # Get the filesystem size
-        statvfs = os.statvfs(urlparse.urlparse(sr).path)
+        statvfs = os.statvfs(getSRpath(dbg, sr))
         psize = statvfs.f_blocks * statvfs.f_frsize
         fsize = statvfs.f_bfree * statvfs.f_frsize
         log.debug("%s: statvfs says psize = %Ld" % (dbg, psize))

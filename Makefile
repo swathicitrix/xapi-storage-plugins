@@ -1,4 +1,6 @@
-LIBS_FILES=__init__.py device.py iscsi.py losetup.py tapdisk.py dmsetup.py nbdclient.py nbdtool.py image.py libvhd.py vhd_coalesce.py poolhelper.py libiscsi.py scsiutil.py
+LIBS_FILES=__init__.py device.py iscsi.py losetup.py tapdisk.py dmsetup.py 
+LIBS_FILES+=nbdclient.py nbdtool.py image.py libvhd.py vhd_coalesce.py 
+LIBS_FILES+=poolhelper.py libiscsi.py scsiutil.py blkinfo.py
 
 # libraries that are python packages
 # (many files in a directory that
@@ -37,7 +39,7 @@ install:
 	(cd volume/org.xen.xapi.storage.gfs2; install -m 0755 gfs2.py plugin.py sr.py volume.py $(DESTDIR)$(SCRIPTDIR)/volume/org.xen.xapi.storage.gfs2)
 	(cd $(DESTDIR)$(SCRIPTDIR)/volume/org.xen.xapi.storage.gfs2; for link in Plugin.diagnostics Plugin.Query; do ln -s plugin.py $$link; done)
 	(cd $(DESTDIR)$(SCRIPTDIR)/volume/org.xen.xapi.storage.gfs2; for link in Volume.destroy Volume.set_description Volume.stat Volume.clone Volume.resize Volume.set_name Volume.unset Volume.create Volume.set Volume.snapshot; do ln -s volume.py $$link; done)
-	(cd $(DESTDIR)$(SCRIPTDIR)/volume/org.xen.xapi.storage.gfs2; for link in SR.destroy SR.stat SR.attach SR.detach SR.create SR.ls ; do ln -s sr.py $$link; done)
+	(cd $(DESTDIR)$(SCRIPTDIR)/volume/org.xen.xapi.storage.gfs2; for link in SR.destroy SR.stat SR.attach SR.detach SR.create SR.ls SR.probe; do ln -s sr.py $$link; done)
 	mkdir -p $(DESTDIR)$(SCRIPTDIR)/volume/org.xen.xapi.storage.lvm2
 	(cd volume/org.xen.xapi.storage.lvm2; install -m 0755 plugin.py sr.py volume.py $(DESTDIR)$(SCRIPTDIR)/volume/org.xen.xapi.storage.lvm2)
 	(cd $(DESTDIR)$(SCRIPTDIR)/volume/org.xen.xapi.storage.lvm2; for link in Plugin.diagnostics Plugin.Query; do ln -s plugin.py $$link; done)
