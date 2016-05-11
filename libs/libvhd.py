@@ -18,6 +18,7 @@ import xcp.environ
 import XenAPI
 
 DP_URI_PREFIX = "vhd+tapdisk://"
+OPT_LOG_ERR = "--debug"
 
 def create(dbg, sr, name, description, size, cb):
 
@@ -95,7 +96,7 @@ def clone(dbg, sr, key, cb):
             (p_name, p_parent, p_desc, p_uuid, p_vsize) = res[0]
 
             res = conn.execute("insert into VDI(snap, parent, name, description, uuid, vsize) values (?, ?, ?, ?, ?, ?)", 
-                               (0, int(key), p_name, p_desc, snap_uuid, p_vsize))
+                               (0, p_parent, p_name, p_desc, snap_uuid, p_vsize))
             snap_name = str(res.lastrowid)
             snap_path = cb.volumeCreate(opq, snap_name, int(p_vsize))
         
@@ -312,18 +313,91 @@ def detach(dbg, uri, domain, cb):
     tap.destroy(dbg)
     tapdisk.forget_tapdisk_metadata(dbg, vol_path)
 
+def db_check_vdi_is_nonpersistent(conn, name):
+    res = conn.execute("select nonpersistent from VDI where rowid=:row", {"row" : int(name)}).fetchAll()
+    return res[0][0] == '1'
+
+def set_vdi_non_persistent(conn, name):
+    conn.execute("update VDI set nonpersistent=1 where rowid=:row", {"row" : int(name)})
+
+def clear_vdi_non_persistent(conn, name):
+    conn.execute("update VDI set nonpersistent=NULL where rowid=:row", {"row" : int(name)})
+
+def truncate_leaf_vhd(vol_path, dbg):
+    "zero out the disk (kill all data inside the VHD file)"
+    cmd = ["/usr/bin/vhd-util", "modify", OPT_LOG_ERR, "-z", "-n", vol_path]
+    call(dbg, cmd)
+
+def num_bits(val):
+    count = 0
+    while val:
+        count += val & 1
+        val = val >> 1
+    return count
+
+def count_bits(bitmap):
+    count=0
+    for i in range(len(bitmap)):
+        count += num_bits(ord(bitmap[i]))
+    return count
+
+def vhd_is_empty(vol_path):
+    cmd = ["/usr/bin/vhd-util", "read", OPT_LOG_ERR, "-B", "-n", vol_path]
+    ret = call(dbg, cmd)
+    return count_bits(ret) == 0
+
+def create_single_clone(conn, sr, name, cb):
+    pass
+
 def epcopen(dbg, uri, persistent, cb):
-    u = urlparse.urlparse(uri)
-    # XXX need some datapath-specific errors below
-    if not(os.path.exists(u.path)):
-        raise xapi.storage.api.volume.Volume_does_not_exist(u.path)
+    sr,name = parse_datapath_uri(uri)
+    opq = cb.volumeStartOperations(sr, 'w')
+
+    vol_path = cb.volumeGetPath(opq, name)
+    meta_path = cb.volumeMetadataGetPath(opq)
+    
+    conn = connectSQLite3(meta_path)
+
+    try:
+        with Lock(opq, "gl", cb):
+            with write_context(conn):
+                if (persistent):
+                    if (db_check_vdi_is_nonpersistent(conn, name)):
+                        # Truncate, etc
+                        truncate_leaf_vdi(vol_path)
+                        clear_vdi_non_persistent(conn, name)
+                elif (db_check_vdi_is_nonpersistent(conn, name)):
+                    # truncate
+                    truncate_leaf_vhd(vol_path)
+                else:
+                    set_vdi_non_persistent(conn, name)
+                    if (not vhd_is_empty(vol_path)):
+                        # Create single clone
+                        create_single_clone(conn, sr, name, cb)
+    finally:
+        conn.close()
+
     return None
 
 def epcclose(dbg, uri, cb):
-    u = urlparse.urlparse(uri)
-    # XXX need some datapath-specific errors below
-    if not(os.path.exists(u.path)):
-        raise xapi.storage.api.volume.Volume_does_not_exist(u.path)
+    sr,name = parse_datapath_uri(uri)
+    opq = cb.volumeStartOperations(sr, 'w')
+
+    vol_path = cb.volumeGetPath(opq, name)
+    meta_path = cb.volumeMetadataGetPath(opq)
+    
+    conn = connectSQLite3(meta_path)
+
+    try:
+        with Lock(opq, "gl", cb):
+            with write_context(conn):
+                if (db_check_vdi_is_nonpersistent(conn, name)):
+                    # truncate
+                    truncate_leaf_vhd(vol_path)
+                    clear_vdi_non_persistent(conn, name)
+    finally:
+        conn.close()
+
     return None
 
 def connectSQLite3(db):

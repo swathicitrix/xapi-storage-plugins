@@ -35,7 +35,9 @@ class Implementation(xapi.storage.api.plugin.Plugin_skeleton):
                 "VDI_CLONE",
                 "VDI_SNAPSHOT",
                 "VDI_RESIZE",
-                "SR_METADATA"],
+                "SR_METADATA",
+                "NONPERSISTENT", # Retire this one
+                "VDI_NONPERSISTENT"],
             "configuration": {},
             "required_cluster_stack": ['corosync']}
 

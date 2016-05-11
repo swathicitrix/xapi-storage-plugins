@@ -249,7 +249,7 @@ class Implementation(xapi.storage.api.volume.SR_skeleton):
         with conn:
             conn.execute("create table VDI(key integer primary key, snap int,"
                          "parent int, name text, description text, vsize text,"
-                         "uuid text, active_on text, gc_status text)")
+                         "uuid text, active_on text, gc_status text, nonpersistent integer)")
             # TODO: define indexes, parent, uuid, (active_on?)
         conn.close()
 
