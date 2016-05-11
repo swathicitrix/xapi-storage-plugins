@@ -1,4 +1,10 @@
 LIBS_FILES=__init__.py device.py iscsi.py losetup.py tapdisk.py dmsetup.py nbdclient.py nbdtool.py image.py libvhd.py vhd_coalesce.py poolhelper.py libiscsi.py scsiutil.py
+
+# libraries that are python packages
+# (many files in a directory that
+# contains an __init__.py file)
+LIBS_PACKAGES=rrddlib
+
 PLUGINS=suspend-resume-datapath gfs2setup
 
 .PHONY: clean
@@ -43,6 +49,8 @@ install:
 	(cd $(DESTDIR)$(SCRIPTDIR)/volume/org.xen.xapi.storage.ffs; for link in Volume.destroy Volume.set_description Volume.stat Volume.clone Volume.resize Volume.set_name Volume.unset Volume.create Volume.set Volume.snapshot; do ln -s volume.py $$link; done)
 	(cd $(DESTDIR)$(SCRIPTDIR)/volume/org.xen.xapi.storage.ffs; for link in SR.destroy SR.stat SR.attach SR.detach SR.create SR.ls ; do ln -s sr.py $$link; done)	
 	mkdir -p $(DESTDIR)$(PYTHONDIR)
-	(cd libs; install -m 0755 $(LIBS_FILES) $(DESTDIR)$(PYTHONDIR)/)
+	(cd libs && \
+	install -m 0755 $(LIBS_FILES) $(DESTDIR)$(PYTHONDIR)/ && \
+	cp -r $(LIBS_PACKAGES) $(DESTDIR)$(PYTHONDIR)/)
 	mkdir -p $(DESTDIR)$(PLUGINSDIR)
 	(cd overlay/etc/xapi.d/plugins; install -m 0755 $(PLUGINS) $(DESTDIR)$(PLUGINSDIR)/)

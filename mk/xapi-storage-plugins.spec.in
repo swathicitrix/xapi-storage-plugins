@@ -35,7 +35,7 @@ DESTDIR=%{buildroot} SCRIPTDIR=%{_libexecdir}/xapi-storage-script/ PYTHONDIR=/us
 %{_libexecdir}/xapi-storage-script/volume/org.xen.xapi.storage.gfs2/*
 %{_libexecdir}/xapi-storage-script/volume/org.xen.xapi.storage.lvm2/*
 %{_libexecdir}/xapi-storage-script/volume/org.xen.xapi.storage.ffs/*
-/usr/lib/python2.7/site-packages/xapi/storage/libs/*.py*
+/usr/lib/python2.7/site-packages/xapi/storage/libs/
 %{_sysconfdir}/xapi.d/plugins/*
 
 %post
