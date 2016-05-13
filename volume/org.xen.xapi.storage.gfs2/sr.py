@@ -133,6 +133,7 @@ def unplug_device(dbg, uri):
         #do nothing for now
         pass
 
+
 class Implementation(xapi.storage.api.volume.SR_skeleton):
 
     def probe(self, dbg, uri):
@@ -346,8 +347,9 @@ class Implementation(xapi.storage.api.volume.SR_skeleton):
         return libvhd.ls(dbg, sr, gfs2.Callbacks())
 
     def stat(self, dbg, sr):
+        uri = getFromSRMetadata(dbg, sr, 'uri')
         # Get the filesystem size
-        statvfs = os.statvfs(getSRpath(dbg, sr))
+        statvfs = os.statvfs(getSRpath(dbg, uri))
         psize = statvfs.f_blocks * statvfs.f_frsize
         fsize = statvfs.f_bfree * statvfs.f_frsize
         log.debug("%s: statvfs says psize = %Ld" % (dbg, psize))
@@ -362,6 +364,7 @@ class Implementation(xapi.storage.api.volume.SR_skeleton):
             "clustered": True,
             "health": ["Healthy", ""]
         }
+
 
 if __name__ == "__main__":
     log.log_call_argv()
