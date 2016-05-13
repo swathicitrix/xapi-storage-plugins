@@ -22,7 +22,8 @@ class Implementation(xapi.storage.api.plugin.Plugin_skeleton):
             "version": "3.0",
             "required_api_version": "3.0",
             "features": [
-            ],
+                "NONPERSISTENT", # Retire this one
+                "VDI_NONPERSISTENT"],
             "configuration": {},
             "required_cluster_stack": []}
 
