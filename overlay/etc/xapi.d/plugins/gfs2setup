@@ -87,7 +87,7 @@ nodelist {""" % (pool_uuid)
 
 def reloadCorosync(session, pool_uuid):
     sysconfigdlm = open("/etc/sysconfig/dlm", "w")
-    sysconfigdlm.write("DLM_CONTROLD_OPTS=\"--enable_fencing=0 --enable_quorum_fencing=0 -K\"\n")
+    sysconfigdlm.write("DLM_CONTROLD_OPTS=\"--enable_fencing=1 --enable_quorum_fencing=1 -K\"\n")
     sysconfigdlm.close()
 
     call(["/usr/sbin/modprobe", "dlm"])
