@@ -319,7 +319,7 @@ def db_check_vdi_is_nonpersistent(dbg, conn, name):
 
     res = conn.execute("select nonpersistent from VDI where rowid=:row",
                        {"row" : int(name)}).fetchall()
-    return res[0][0] == '1'
+    return res[0][0] == 1
 
 def set_vdi_non_persistent(conn, name):
     conn.execute("update VDI set nonpersistent=1 where rowid=:row",
