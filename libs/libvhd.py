@@ -313,15 +313,21 @@ def detach(dbg, uri, domain, cb):
     tap.destroy(dbg)
     tapdisk.forget_tapdisk_metadata(dbg, vol_path)
 
-def db_check_vdi_is_nonpersistent(conn, name):
-    res = conn.execute("select nonpersistent from VDI where rowid=:row", {"row" : int(name)}).fetchAll()
+def db_check_vdi_is_nonpersistent(dbg, conn, name):
+    log.debug("%s: libvhd.db_check_vdi_is_nonpersistent: name == %s" %
+              (dbg, name))
+
+    res = conn.execute("select nonpersistent from VDI where rowid=:row",
+                       {"row" : int(name)}).fetchall()
     return res[0][0] == '1'
 
 def set_vdi_non_persistent(conn, name):
-    conn.execute("update VDI set nonpersistent=1 where rowid=:row", {"row" : int(name)})
+    conn.execute("update VDI set nonpersistent=1 where rowid=:row",
+                 {"row" : int(name)})
 
 def clear_vdi_non_persistent(conn, name):
-    conn.execute("update VDI set nonpersistent=NULL where rowid=:row", {"row" : int(name)})
+    conn.execute("update VDI set nonpersistent=NULL where rowid=:row",
+                 {"row" : int(name)})
 
 def truncate_leaf_vhd(vol_path, dbg):
     "zero out the disk (kill all data inside the VHD file)"
@@ -336,12 +342,12 @@ def num_bits(val):
     return count
 
 def count_bits(bitmap):
-    count=0
+    count = 0
     for i in range(len(bitmap)):
         count += num_bits(ord(bitmap[i]))
     return count
 
-def vhd_is_empty(vol_path):
+def vhd_is_empty(dbg, vol_path):
     cmd = ["/usr/bin/vhd-util", "read", OPT_LOG_ERR, "-B", "-n", vol_path]
     ret = call(dbg, cmd)
     return count_bits(ret) == 0
@@ -350,7 +356,9 @@ def create_single_clone(conn, sr, name, cb):
     pass
 
 def epcopen(dbg, uri, persistent, cb):
-    sr,name = parse_datapath_uri(uri)
+    log.debug("%s: Datapath.epcopen: uri == %s" % (dbg, uri))
+
+    sr, name = parse_datapath_uri(uri)
     opq = cb.volumeStartOperations(sr, 'w')
 
     vol_path = cb.volumeGetPath(opq, name)
@@ -360,27 +368,40 @@ def epcopen(dbg, uri, persistent, cb):
 
     try:
         with Lock(opq, "gl", cb):
-            with write_context(conn):
-                if (persistent):
-                    if (db_check_vdi_is_nonpersistent(conn, name)):
-                        # Truncate, etc
-                        truncate_leaf_vdi(vol_path)
-                        clear_vdi_non_persistent(conn, name)
-                elif (db_check_vdi_is_nonpersistent(conn, name)):
-                    # truncate
-                    truncate_leaf_vhd(vol_path)
-                else:
-                    set_vdi_non_persistent(conn, name)
-                    if (not vhd_is_empty(vol_path)):
-                        # Create single clone
-                        create_single_clone(conn, sr, name, cb)
+            try:
+                with write_context(conn):
+                    if (persistent):
+                        log.debug("%s: Datapath.epcopen: %s is persistent "
+                                  % (dbg, vol_path))
+                        if (db_check_vdi_is_nonpersistent(dbg, conn, name)):
+                            # Truncate, etc
+                            truncate_leaf_vhd(vol_path)
+                            clear_vdi_non_persistent(conn, name)
+                    elif (db_check_vdi_is_nonpersistent(dbg, conn, name)):
+                        log.debug(
+                            "%s: Datapath.epcopen: %s already marked non-persistent"
+                            % (dbg, vol_path))
+                        # truncate
+                        truncate_leaf_vhd(vol_path, dbg)
+                    else:
+                        log.debug("%s: Datapath.epcopen: %s is non-persistent"
+                                  % (dbg, vol_path))
+                        set_vdi_non_persistent(conn, name)
+                        if (not vhd_is_empty(dbg, vol_path)):
+                            # Create single clone
+                            create_single_clone(conn, sr, name, cb)
+            except:
+                log.error("%s: Datapath.epcopen: failed to complete open, %s"
+                          % (dbg, sys.exc_info()[0]))
+                raise
     finally:
         conn.close()
 
     return None
 
 def epcclose(dbg, uri, cb):
-    sr,name = parse_datapath_uri(uri)
+    log.debug("%s: Datapath.epcclose: uri == %s" % (dbg, uri))
+    sr, name = parse_datapath_uri(uri)
     opq = cb.volumeStartOperations(sr, 'w')
 
     vol_path = cb.volumeGetPath(opq, name)
@@ -391,10 +412,14 @@ def epcclose(dbg, uri, cb):
     try:
         with Lock(opq, "gl", cb):
             with write_context(conn):
-                if (db_check_vdi_is_nonpersistent(conn, name)):
+                if (db_check_vdi_is_nonpersistent(dbg, conn, name)):
                     # truncate
-                    truncate_leaf_vhd(vol_path)
+                    truncate_leaf_vhd(vol_path, dbg)
                     clear_vdi_non_persistent(conn, name)
+    except:
+        log.error("%s: Datapath.epcclose: failed to complete close, %s"
+                  % (dbg, sys.exc_info()[0]))
+        raise
     finally:
         conn.close()
 
