@@ -229,6 +229,8 @@ class Implementation(xapi.storage.api.volume.SR_skeleton):
 
 
     def attach(self, dbg, uri):
+        from stats import start_stats
+
         log.debug("%s: SR.attach: uri=%s" % (dbg, uri))
 
         # Notify other pool members we have arrived
@@ -264,8 +266,9 @@ class Implementation(xapi.storage.api.volume.SR_skeleton):
 
         sr = "file://" + mnt_path
 
-        # Start GC for this host
+        # Start GC and stats for this host
         libvhd.startGC(dbg, "gfs2", sr)
+        start_stats(sr)
 
         return sr
 
@@ -349,11 +352,14 @@ class Implementation(xapi.storage.api.volume.SR_skeleton):
         return
 
     def detach(self, dbg, sr):
+        from stats import stop_stats
+
         # Get the iSCSI uri from the SR metadata
         uri = getFromSRMetadata(dbg, sr, 'uri')
 
-        # stop GC
+        # stop GC and stats
         libvhd.stopGC(dbg, "gfs2", sr)
+        stop_stats(sr)
 
         # Unmount the FS
         mnt_path = getSRMountPath(dbg, uri)
