@@ -193,7 +193,7 @@ def ls(dbg, sr, cb):
     meta_path = cb.volumeMetadataGetPath(opq)
 
     conn = connectSQLite3(meta_path)
-    res = conn.execute("select key,name,description,uuid,vsize from VDI where key not in (select parent from VDI where parent NOT NULL group by parent)").fetchall()
+    res = conn.execute("select key,name,description,uuid,vsize from VDI where uuid not NULL").fetchall()
     conn.close()
     
     for (key_int,name,desc,uuid,vsize) in res:
