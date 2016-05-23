@@ -20,8 +20,7 @@ import XenAPI
 # For a block device /a/b/c, we will mount it at <mountpoint_root>/a/b/c
 mountpoint_root = "/var/run/sr-mount/"
 
-def getSRMountPath(dbg, uri, check=True):
-    dev_path = blkinfo.get_device_path(dbg, uri)
+def getSRMountPath(dbg, dev_path, check=True):
     mnt_path = os.path.abspath(mountpoint_root + dev_path)
 
     if check:
@@ -50,6 +49,11 @@ def getFromSRMetadata(dbg, sr, key):
                 value = meta[key]
     log.debug("%s: SR metadata says '%s' -> '%s'" % (dbg, key, value))
     return value
+
+def get_unique_id_from_dev_path(dev_path):
+    # This is basically just returning scsi-id
+    # it is removing "/dev/disk/by-id/scsi-" from dev_path
+    return dev_path[21:]
 
 def sanitise_name(dbg, name):
     sanitised = ""
@@ -133,11 +137,38 @@ def unplug_device(dbg, uri):
         #do nothing for now
         pass
 
+def find_if_gfs2(impl, dbg, uri):
+    srs = []
+    dev_path = blkinfo.get_device_path(dbg, uri)
+    unique_id = get_unique_id_from_dev_path(dev_path)
+    if blkinfo.get_format(dbg, dev_path) == "LVM2_member":
+        gfs2_dev_path = "/dev/" + unique_id + "/gfs2"
+        # activate gfs2 LV
+        cmd = ["/usr/sbin/lvchange", "-ay", unique_id + "/gfs2"]
+        call(dbg, cmd)
+        if blkinfo.get_format(dbg, gfs2_dev_path) == "gfs2":
+            mount = False
+            try: 
+                mnt_path = getSRMountPath(dbg, gfs2_dev_path)
+            except:
+                #mount path doesn't exist
+                mount = True
+                mnt_path = mount_local(dbg, gfs2_dev_path)
+            # stat takes sr_path which is 
+            # file://<mnt_path>
+            sr_path = "file://%s" % mnt_path
+            srs.append(impl.stat(dbg, sr_path))
+            if mount == True:
+                umount(dbg, mnt_path)
+                # deactivate gfs2 LV
+                cmd = ["/usr/sbin/lvchange", "-an", unique_id + "/gfs2"]
+                call(dbg, cmd)
+
+    return srs
 
 class Implementation(xapi.storage.api.volume.SR_skeleton):
 
     def probe(self, dbg, uri):
-        srs = []
         uris = []
 
         u = urlparse.urlparse(uri)
@@ -182,21 +213,7 @@ class Implementation(xapi.storage.api.volume.SR_skeleton):
                 # device is formatted using GFS2.
                 try: 
                     libiscsi.login(dbg, probe_uuid, keys)
-                    dev_path = blkinfo.get_device_path(dbg, uri)
-                    if blkinfo.get_format(dbg, dev_path) == "gfs2":
-                        mount = False
-                        try: 
-                            mnt_path = getSRMountPath(dbg, uri)
-                        except:
-                            #mount path doesn't exist
-                            mount = True
-                            mnt_path = mount_local(dbg, dev_path)
-                        # stat takes sr_path which is 
-                        # file://<mnt_path>
-                        sr_path = "file://%s" % mnt_path
-                        srs.append(self.stat(dbg, sr_path))
-                        if mount == True:
-                            umount(dbg, mnt_path)
+                    srs = find_if_gfs2(self, dbg, uri)
                 finally: 
                     libiscsi.logout(dbg, probe_uuid, keys['iqn'])
                     
@@ -206,21 +223,7 @@ class Implementation(xapi.storage.api.volume.SR_skeleton):
                     uris.append(new_uri)
         else:
             #HBA transport
-            dev_path = blkinfo.get_device_path(dbg, uri)
-            if blkinfo.get_format(dbg, dev_path) == "gfs2":
-                mount = False
-                try: 
-                    mnt_path = getSRMountPath(dbg, uri)
-                except:
-                    #mount path doesn't exist
-                    mount = True
-                    mnt_path = mount_local(dbg, dev_path)
-                # stat takes sr_path which is 
-                # file://<mnt_path>
-                sr_path = "file://%s" % mnt_path
-                srs.append(self.stat(dbg, sr_path))
-                if mount == True:
-                    umount(dbg, mnt_path)
+            srs = find_if_gfs2(self, dbg, uri)
 
         return {
             "srs": srs,
@@ -229,9 +232,18 @@ class Implementation(xapi.storage.api.volume.SR_skeleton):
 
 
     def attach(self, dbg, uri):
-        from stats import start_stats
-
+        import socket, struct
         log.debug("%s: SR.attach: uri=%s" % (dbg, uri))
+
+        # Zone in the LUN on this host
+        dev_path = plug_device(dbg, uri)
+
+        unique_id = get_unique_id_from_dev_path(dev_path)
+
+        # Fixme: activate sdb LV and start fencing daemon
+        # activate sbd LV
+        cmd = ["/usr/sbin/lvchange", "-ay", unique_id + "/sbd"]
+        call(dbg, cmd)
 
         # Notify other pool members we have arrived
         inventory = xcp.environ.readInventory()
@@ -252,23 +264,32 @@ class Implementation(xapi.storage.api.volume.SR_skeleton):
                 session.xenapi.host.call_plugin(
                     host, "gfs2setup", "gfs2Reload", {})
 
+        sbd_dev_path = "/dev/" + unique_id + "/sbd"
+        nodeip = session.xenapi.host.get_address(this_host)
+        nodeid = struct.unpack("!L", socket.inet_aton(nodeip))[0]
+
         # this_host will reload last
         log.debug("%s: refresh host %s" % (dbg, session.xenapi.host.get_name_label(this_host)))
         session.xenapi.host.call_plugin(
             this_host, "gfs2setup", "gfs2Reload", {})
 
-        # Zone in the LUN on this host
-        dev_path = plug_device(dbg, uri)
+        #cmd = ["/usr/bin/systemctl", "restart", "corosync"]
+        #call(dbg, cmd)
+
+        # activate gfs2 LV
+        cmd = ["/usr/sbin/lvchange", "-ay", unique_id + "/gfs2"]
+        call(dbg, cmd)
+
+        gfs2_dev_path = "/dev/" + unique_id + "/gfs2"
 
         # Mount the gfs2 filesystem
-        mnt_path = mount(dbg, dev_path)
+        mnt_path = mount(dbg, gfs2_dev_path)
         log.debug("%s: mounted on %s" % (dbg, mnt_path))
 
         sr = "file://" + mnt_path
 
-        # Start GC and stats for this host
+        # Start GC for this host
         libvhd.startGC(dbg, "gfs2", sr)
-        start_stats(sr)
 
         return sr
 
@@ -292,10 +313,42 @@ class Implementation(xapi.storage.api.volume.SR_skeleton):
         dev_path = plug_device(dbg, uri)
         log.debug("%s: dev_path = %s" % (dbg, dev_path))
 
-        # Make sure we wipe any previous GFS2 metadata
-        dd_dev_path = "of=" + dev_path
-        cmd = ["/usr/bin/dd", "if=/dev/zero", dd_dev_path, "bs=1M", "count=10", "oflag=direct"]
+        cmd = ["/usr/bin/dd", "if=/dev/zero", "of=%s" % dev_path, "bs=1M",
+               "count=10", "oflag=direct"]
         call(dbg, cmd)
+
+        unique_id = get_unique_id_from_dev_path(dev_path)
+
+        # create the VG on the LUN
+        cmd = ["/usr/sbin/vgcreate", "-f", unique_id, dev_path, "--config", "global{metadata_read_only=0}"]
+        call(dbg, cmd)
+
+        # create the sbd LV
+        cmd = ["/usr/sbin/lvcreate", "-L", "16M", "-n", "sbd", unique_id, "--config", "global{metadata_read_only=0}"]
+        call(dbg, cmd)
+
+        # activate sbd LV
+        cmd = ["/usr/sbin/lvchange", "-ay", unique_id + "/sbd"]
+        call(dbg, cmd)
+
+        # format sbd device
+        sbd_dev_path = "/dev/" + unique_id + "/sbd"
+        #cmd = ["/usr/sbin/sbd", "-d", sbd_dev_path, "create"]
+        #call(dbg, cmd)
+
+        # deactivate sbd LV
+        cmd = ["/usr/sbin/lvchange", "-an", unique_id + "/sbd"]
+        call(dbg, cmd)
+
+        # create the gfs2 LV
+        cmd = ["/usr/sbin/lvcreate", "-l", "100%FREE", "-n", "gfs2", unique_id, "--config", "global{metadata_read_only=0}"]
+        call(dbg, cmd)
+
+        # activate gfs2 LV
+        cmd = ["/usr/sbin/lvchange", "-ay", unique_id + "/gfs2"]
+        call(dbg, cmd)
+
+        gfs2_dev_path = "/dev/" + unique_id + "/gfs2"
 
         # Make the filesystem
         cmd = ["/usr/sbin/mkfs.gfs2",
@@ -305,11 +358,11 @@ class Implementation(xapi.storage.api.volume.SR_skeleton):
                "-J", "128",
                "-O",
                "-j", "16",
-               dev_path]
+               gfs2_dev_path]
         call(dbg, cmd)
 
         # Temporarily mount the filesystem so we can write the SR metadata
-        mnt_path = mount_local(dbg, dev_path)
+        mnt_path = mount_local(dbg, gfs2_dev_path)
 
         # FIXME: Move DB specific code to another place
         # create metadata DB
@@ -331,7 +384,7 @@ class Implementation(xapi.storage.api.volume.SR_skeleton):
             "name": name,
             "description": description,
             "uri": uri,
-            "unique_id": mnt_path[18:],
+            "unique_id": unique_id,
             "fsname": fsname,
             "read_caching": read_caching,
             "keys": {}
@@ -344,26 +397,43 @@ class Implementation(xapi.storage.api.volume.SR_skeleton):
             json_fp.write("\n")
 
         umount(dbg, mnt_path)
+
+        # deactivate gfs2 LV
+        cmd = ["/usr/sbin/lvchange", "-an", unique_id + "/gfs2"]
+        call(dbg, cmd)
+
         unplug_device(dbg, uri)
         return
 
     def destroy(self, dbg, sr):
-        # no need to destroy anything
-        return
+        # Fixme: actually destroy the data
+        return detach(dbg, sr)
 
     def detach(self, dbg, sr):
-        from stats import stop_stats
-
         # Get the iSCSI uri from the SR metadata
         uri = getFromSRMetadata(dbg, sr, 'uri')
 
-        # stop GC and stats
-        libvhd.stopGC(dbg, "gfs2", sr)
-        stop_stats(sr)
+        # Get the unique_id from the SR metadata
+        unique_id = getFromSRMetadata(dbg, sr, 'unique_id')
+
+        # stop GC
+        try:
+            libvhd.stopGC(dbg, "gfs2", sr)
+        except:
+            log.debug("GC already stopped")
 
         # Unmount the FS
-        mnt_path = getSRMountPath(dbg, uri)
+        mnt_path = urlparse.urlparse(sr).path
         umount(dbg, mnt_path)
+
+        # deactivate gfs2 LV
+        cmd = ["/usr/sbin/lvchange", "-an", unique_id + "/gfs2"]
+        call(dbg, cmd)
+
+        # Fixme: kill fencing daemon and deactivate sdb LV
+        # deactivate sbd LV
+        cmd = ["/usr/sbin/lvchange", "-an", unique_id + "/sbd"]
+        call(dbg, cmd)
 
         # Unplug device if need be
         unplug_device(dbg, uri)

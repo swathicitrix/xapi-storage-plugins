@@ -91,6 +91,7 @@ def reloadCorosync(session, pool_uuid):
     sysconfigdlm.close()
 
     call(["/usr/sbin/modprobe", "dlm"])
+    call(["/usr/sbin/modprobe", "xen_wdt"])
 
     if call(["/usr/bin/systemctl", "is-enabled", "corosync"]) != "enabled":
         call(["/usr/bin/systemctl", "enable", "corosync"])
