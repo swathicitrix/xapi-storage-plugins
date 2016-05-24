@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-
 import libiscsi
 import urlparse
 from xapi.storage.common import call

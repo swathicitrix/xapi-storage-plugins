@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-
 from xapi.storage.common import call
 
 """

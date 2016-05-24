@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-
 import uuid
 import sqlite3
 import os, sys
