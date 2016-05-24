@@ -1,5 +1,3 @@
-#!/usr/bin/python
-
 """RRDD Plugin Protocol V2 Backend module
 """
 

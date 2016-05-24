@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-
 import xapi
 import fcntl
 from xapi.storage import log

@@ -1,5 +1,3 @@
-#!/usr/bin/python
-
 from xmlrpclib import Transport
 from httplib import HTTPConnection
 from backend import PluginBackend
