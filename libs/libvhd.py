@@ -19,6 +19,7 @@ import XenAPI
 
 DP_URI_PREFIX = "vhd+tapdisk://"
 OPT_LOG_ERR = "--debug"
+MSIZE_MB = 2 * 1024 * 1024
 
 def create(dbg, sr, name, description, size, cb):
 
@@ -44,7 +45,7 @@ def create(dbg, sr, name, description, size, cb):
 
         # Create the VHD
         cmd = ["/usr/bin/vhd-util", "create", "-n", vol_path,
-               "-s", str(size_mib)]
+               "-s", str(size_mib), "-S", str(MSIZE_MB)]
         call(dbg, cmd)
 
         cb.volumeDeactivateLocal(opq, vol_name)
@@ -81,6 +82,28 @@ def destroy(dbg, sr, key, cb):
         conn.close()
     cb.volumeStopOperations(opq)
 
+def resize(dbg, sr, key, new_size, cb):
+    size = int(new_size)
+    size_mib = size / 1048576
+    if size % 1048576 != 0:
+        size_mib = size_mib + 1
+    vsize = size_mib * 1048576
+
+    opq = cb.volumeStartOperations(sr, 'w')
+    key_path = cb.volumeGetPath(opq, key)
+    meta_path = cb.volumeMetadataGetPath(opq)
+
+    conn = connectSQLite3(meta_path)
+    with write_context(conn):
+        conn.execute("update VDI set vsize = (?) where rowid = (?)", (str(vsize), int(key),))
+        cb.volumeResize(opq, key, vsize)
+        cmd = ["/usr/bin/vhd-util", "resize", "-n", key_path,
+               "-s", str(size_mib), "-f"] 
+        call(dbg, cmd)
+
+    conn.close()
+    cb.volumeStopOperations(opq)
+
 def clone(dbg, sr, key, cb):
     snap_uuid = str(uuid.uuid4())
 
@@ -102,7 +125,7 @@ def clone(dbg, sr, key, cb):
         
             # Snapshot from key
             cmd = ["/usr/bin/vhd-util", "snapshot",
-                   "-n", snap_path, "-p", key_path]
+                   "-n", snap_path, "-p", key_path, "-S", str(MSIZE_MB)]
             output = call(dbg, cmd)
     
             # NB. As an optimisation, "vhd-util snapshot A->B" will check if
@@ -129,7 +152,7 @@ def clone(dbg, sr, key, cb):
                 cb.volumeCreate(opq, key, int(p_vsize))
 
                 cmd = ["/usr/bin/vhd-util", "snapshot",
-                       "-n", key_path, "-p", base_path]
+                       "-n", key_path, "-p", base_path, "-S", str(MSIZE_MB)]
                 output = call(dbg, cmd)
 
                 # Finally, update the snapshot parent to the rebased volume

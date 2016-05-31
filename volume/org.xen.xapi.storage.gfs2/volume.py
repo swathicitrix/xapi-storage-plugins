@@ -23,8 +23,8 @@ class Implementation(xapi.storage.api.volume.Volume_skeleton):
         return libvhd.destroy(dbg, sr, key, gfs2.Callbacks())
 
     def resize(self, dbg, sr, key, new_size):
-        return libvhd.destroy(dbg, sr, key, new_size, 
-                              gfs2.Callbacks())
+        return libvhd.resize(dbg, sr, key, new_size, 
+                             gfs2.Callbacks())
 
     def set(self, dbg, sr, key, k, v):
         libvhd.set(dbg, sr, key, k, v, gfs2.Callbacks())
