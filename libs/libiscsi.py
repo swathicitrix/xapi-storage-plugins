@@ -13,46 +13,12 @@ import xcp.environ
 import XenAPI
 import socket
 import scsiutil
-import xml.dom.minidom
 import fcntl
+from xapi.storage.libs import util
 
 DEFAULT_PORT = 3260
 ISCSI_REFDIR = '/var/run/sr-ref'
-RETRY_MAX = 20 # retries
-RETRY_PERIOD = 1.0 # seconds
 DEV_PATH_ROOT = '/dev/disk/by-id/scsi-'
-
-# TODO: File locking logic can be factored out into a util lib
-#Opens and locks a file, returns filehandle
-def lock_file(dbg, filename, mode="a+"):
-    try:
-        f = open(filename, mode)
-    except:
-        raise xapi.storage.api.volume.Unimplemented(
-                  "Couldn't open refcount file: %s" % filename)
-    retries = 0
-    while True:
-        try:
-            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            break
-        except IOError as e:
-            # raise on unrelated IOErrors
-            if e.errno != errno.EAGAIN:
-                raise
-
-        if retries >= RETRY_MAX:
-            raise xapi.storage.api.volume.Unimplemented(
-                  "Couldn't lock refcount file: %s" % filename)
-        time.sleep(RETRY_PERIOD)
-
-    return f
-
-
-#Unlocks and closes file
-def unlock_file(dbg, filehandle):
-    fcntl.flock(filehandle, fcntl.LOCK_UN)
-    filehandle.close()
-
 
 def queryLUN(dbg, path, id):
     vendor = scsiutil.getmanufacturer(dbg, path)
@@ -175,7 +141,7 @@ def login(dbg, ref_str, keys):
         os.mkdir(ISCSI_REFDIR)
     filename = os.path.join(ISCSI_REFDIR, keys['iqn'])
 
-    f = lock_file(dbg, filename, "a+")
+    f = util.lock_file(dbg, filename, "a+")
 
     current_sessions = listSessions(dbg)
     log.debug("%s: current iSCSI sessions are %s" % (dbg, current_sessions))
@@ -202,8 +168,9 @@ def login(dbg, ref_str, keys):
     if not found:
         f.write("%s\n" % ref_str)
 
-    unlock_file(dbg, f)
-    waitForDevice(dbg)
+    util.unlock_file(dbg, f)
+
+    waitForDevice(dbg, keys)
 
     # Return path to logged in target
     target_path = "/dev/iscsi/%s/%s" % (keys['iqn'], portal)
@@ -215,7 +182,7 @@ def logout(dbg, ref_str, iqn):
     if not os.path.exists(filename):
         return 
 
-    f = lock_file(dbg, filename, "r+")
+    f = util.lock_file(dbg, filename, "r+")
 
     refcount = 0
     file_content = f.readlines()
@@ -231,18 +198,24 @@ def logout(dbg, ref_str, iqn):
         cmd = ["/usr/sbin/iscsiadm", "-m", "node", "-T", iqn, "-u"]
         call(dbg, cmd)
 
-    unlock_file(dbg, f)
+    util.unlock_file(dbg, f)
         
 
-def waitForDevice(dbg):
+def waitForDevice(dbg, keys):
     # Wait for new device(s) to appear
     cmd = ["/usr/sbin/udevadm", "settle"]
     call(dbg, cmd)
 
     # FIXME: For some reason, udevadm settle isn't sufficient 
     # to ensure the device is present. Why not?
-    time.sleep(10)
-
+    for i in range(1,10):
+        time.sleep(1)
+        if keys['scsiid'] != None:
+            try:
+                os.stat(DEV_PATH_ROOT + keys['scsiid'])
+                return
+            except:
+                log.debug("%s: Waiting for device to appear" % dbg)
 
 def listSessions(dbg):
     '''Return a list of (sessionid, portal, targetIQN) pairs 

@@ -1,6 +1,7 @@
 LIBS_FILES=__init__.py device.py iscsi.py losetup.py tapdisk.py dmsetup.py 
 LIBS_FILES+=nbdclient.py nbdtool.py image.py libvhd.py vhd_coalesce.py 
 LIBS_FILES+=poolhelper.py libiscsi.py scsiutil.py blkinfo.py
+LIBS_FILES+=util.py
 
 # libraries that are python packages
 # (many files in a directory that

@@ -16,9 +16,11 @@ import fcntl
 import json
 import xcp.environ
 import XenAPI
+from xapi.storage.libs import util
 
 # For a block device /a/b/c, we will mount it at <mountpoint_root>/a/b/c
 mountpoint_root = "/var/run/sr-mount/"
+DLM_REFDIR = "/var/run/sr-ref"
 
 def getSRMountPath(dbg, dev_path, check=True):
     mnt_path = os.path.abspath(mountpoint_root + dev_path)
@@ -235,16 +237,6 @@ class Implementation(xapi.storage.api.volume.SR_skeleton):
         import socket, struct
         log.debug("%s: SR.attach: uri=%s" % (dbg, uri))
 
-        # Zone in the LUN on this host
-        dev_path = plug_device(dbg, uri)
-
-        unique_id = get_unique_id_from_dev_path(dev_path)
-
-        # Fixme: activate sdb LV and start fencing daemon
-        # activate sbd LV
-        cmd = ["/usr/sbin/lvchange", "-ay", unique_id + "/sbd"]
-        call(dbg, cmd)
-
         # Notify other pool members we have arrived
         inventory = xcp.environ.readInventory()
         session = XenAPI.xapi_local()
@@ -264,17 +256,44 @@ class Implementation(xapi.storage.api.volume.SR_skeleton):
                 session.xenapi.host.call_plugin(
                     host, "gfs2setup", "gfs2Reload", {})
 
-        sbd_dev_path = "/dev/" + unique_id + "/sbd"
-        nodeip = session.xenapi.host.get_address(this_host)
-        nodeid = struct.unpack("!L", socket.inet_aton(nodeip))[0]
-
         # this_host will reload last
         log.debug("%s: refresh host %s" % (dbg, session.xenapi.host.get_name_label(this_host)))
         session.xenapi.host.call_plugin(
             this_host, "gfs2setup", "gfs2Reload", {})
 
-        #cmd = ["/usr/bin/systemctl", "restart", "corosync"]
-        #call(dbg, cmd)
+        # Zone in the LUN on this host
+        dev_path = plug_device(dbg, uri)
+
+        unique_id = get_unique_id_from_dev_path(dev_path)
+
+        # activate sbd LV
+        cmd = ["/usr/sbin/lvchange", "-ay", unique_id + "/sbd"]
+        call(dbg, cmd)
+
+        # Fixme: start fencing daemon
+
+        sbd_dev_path = "/dev/" + unique_id + "/sbd"
+
+        # Lock refcount file before starting dlm
+        if not os.path.exists(DLM_REFDIR):
+            os.mkdir(DLM_REFDIR)
+        dlmref = os.path.join(DLM_REFDIR, "dlmref")
+
+        f = util.lock_file(dbg, dlmref, "a+")
+
+        # Increment refcount
+        found = False
+        for line in f.readlines():
+            if line.find(unique_id) != -1:
+                found = True
+        if not found:
+            f.write("%s\n" % unique_id)
+
+        # start dlm should be idempotent
+        cmd = ["/usr/bin/systemctl", "start", "dlm"]
+        call(dbg, cmd)
+
+        util.unlock_file(dbg, f)
 
         # activate gfs2 LV
         cmd = ["/usr/sbin/lvchange", "-ay", unique_id + "/gfs2"]
@@ -407,7 +426,7 @@ class Implementation(xapi.storage.api.volume.SR_skeleton):
 
     def destroy(self, dbg, sr):
         # Fixme: actually destroy the data
-        return detach(dbg, sr)
+        return self.detach(dbg, sr)
 
     def detach(self, dbg, sr):
         # Get the iSCSI uri from the SR metadata
@@ -426,11 +445,31 @@ class Implementation(xapi.storage.api.volume.SR_skeleton):
         mnt_path = urlparse.urlparse(sr).path
         umount(dbg, mnt_path)
 
+        dlmref = os.path.join(DLM_REFDIR, "dlmref")
+
+        f = util.lock_file(dbg, dlmref, "r+")
+
+        refcount = 0
+        file_content = f.readlines()
+        f.seek(0,0)
+        for line in file_content:
+            if line.find(unique_id) == -1:
+                f.write(line)
+                refcount += 1
+        f.truncate()
+
+        if not refcount:
+            os.unlink(dlmref)
+            cmd = ["/usr/bin/systemctl", "stop", "dlm"]
+            call(dbg, cmd)
+
+        util.unlock_file(dbg, f)
+
         # deactivate gfs2 LV
         cmd = ["/usr/sbin/lvchange", "-an", unique_id + "/gfs2"]
         call(dbg, cmd)
 
-        # Fixme: kill fencing daemon and deactivate sdb LV
+        # Fixme: kill fencing daemon
         # deactivate sbd LV
         cmd = ["/usr/sbin/lvchange", "-an", unique_id + "/sbd"]
         call(dbg, cmd)

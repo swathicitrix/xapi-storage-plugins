@@ -102,8 +102,8 @@ def reloadCorosync(session, pool_uuid):
 
     if call(["/usr/bin/systemctl", "is-enabled", "dlm"]) != "enabled":
         call(["/usr/bin/systemctl", "enable", "dlm"])
-    if call(["/usr/bin/systemctl", "is-active", "dlm"]) != "active":
-        call(["/usr/bin/systemctl", "start", "dlm"])
+    #if call(["/usr/bin/systemctl", "is-active", "dlm"]) != "active":
+    #    call(["/usr/bin/systemctl", "start", "dlm"])
 
     call(["/usr/sbin/modprobe", "gfs2"])
 
