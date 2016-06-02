@@ -6,13 +6,13 @@ from xapi.storage.common import call
 from xapi.storage import log
 import xml.dom.minidom
 import fcntl
+import errno
 
 RETRY_MAX = 20 # retries
 RETRY_PERIOD = 1.0 # seconds
 
-# TODO: File locking logic can be factored out into a util lib
 #Opens and locks a file, returns filehandle
-def lock_file(dbg, filename, mode="a+"):
+def try_lock_file(dbg, filename, mode="a+"):
     try:
         f = open(filename, mode)
     except:
@@ -33,6 +33,12 @@ def lock_file(dbg, filename, mode="a+"):
                   "Couldn't lock refcount file: %s" % filename)
         time.sleep(RETRY_PERIOD)
 
+    return f
+
+
+def lock_file(dbg, filename, mode="a+"):
+    f = open(filename, mode)
+    fcntl.flock(f, fcntl.LOCK_EX)
     return f
 
 

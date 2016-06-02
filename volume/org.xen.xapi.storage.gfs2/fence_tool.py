@@ -8,6 +8,11 @@ from xapi.storage.libs import util
 from xapi.storage.common import call
 import xapi.storage.libs.poolhelper
 import mmap
+import signal
+import pickle
+import shelve
+import fcntl
+import struct
 
 BLK_SIZE = 512
 
@@ -18,6 +23,18 @@ MSG_EXIT      = '\x03'
 MSG_EXIT_ACK  = '\x04'
 
 WD_TIMEOUT = 60
+
+DLMREF = "/var/run/sr-ref/dlmref"
+DLMREF_LOCK = "/var/run/sr-ref/dlmref.lock"
+
+IOCWD = 0xc0045706
+
+def demonize():
+    for fd in [0, 1, 2]:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
 
 def block_read(bd, offset):
     f = os.open(bd, os.O_RDONLY)
@@ -34,39 +51,46 @@ def block_write(bd, offset, msg):
     os.write(f, m)
     os.close(f)
 
-def dlm_fencing_daemon(node_id):
+def dlm_fence_daemon(node_id):
     n = int(node_id)
-    log.debug("Starting dlm_fencing_daemon on node_id=%d" % n)
+    log.debug("Starting dlm_fence_daemon on node_id=%d" % n)
     wd = os.open("/dev/watchdog", os.O_WRONLY)
+    def dlm_fence_daemon_signal_handler(sig, frame):
+        log.debug("dlm_fence_daemon_signal_handler")
+        os.write(wd, "V")
+        os.close(wd)
+        log.debug("dlm_fence_daemon: exiting cleanly")
+        exit(0)
+    signal.signal(signal.SIGUSR1, dlm_fence_daemon_signal_handler)
+    demonize()
     while True:
-        f = util.lock_file("SSSS", "/var/run/sr-ref/dlmref", "r+")
-        file_content = f.readlines()
-        for line in file_content:
-            bd = "/dev/" + line.rstrip() + "/sbd"
+        f = util.lock_file("SSSS", DLMREF_LOCK, "r+")
+        d = shelve.open(DLMREF)
+        klist = d.keys()
+        for key in klist:
+            bd = "/dev/" + key + "/sbd"
             ret = block_read(bd, BLK_SIZE * 2 * n)
             if ret == MSG_OK:
-                log.debug("dlm_fencing_daemon: MSG_OK")
+                log.debug("dlm_fence_daemon: MSG_OK")
             elif ret == MSG_FENCE:
-                log.debug("dlm_fencing_daemon: MSG_FENCE")
-                log.debug("dlm_fencing_daemon: suspending all GFS2 mounts")
-                # suspend all gfs2 LVs
-                for iscsi_id in file_content:
-                    gfs2_bd = "/dev/" + line.rstrip() + "/gfs2"
-                    cmd = ["/usr/sbin/dmsetup", "suspend", gfs2_bd]
-                    call("dlm_fencing_daemon", cmd)
-                log.debug("dlm_fencing_daemon: writing MSG_FENCE_ACK")
+                log.debug("dlm_fence_daemon: MSG_FENCE")
+                log.debug("dlm_fence_daemon: Settingo WD to 1 second")
+                s = struct.pack ("i", 1)
+                fcntl.ioctl(wd, 3221509894 , s)
+                log.debug("dlm_fence_daemon: writing MSG_FENCE_ACK")
                 ret = block_write(bd, BLK_SIZE * ((2 * n) + 1), MSG_FENCE_ACK)
-                log.debug("dlm_fencing_daemon: triggering a reboot")
+                log.debug("dlm_fence_daemon: MSG_FENCE_ACK sent")
                 # force reboot here
                 return
             elif ret == MSG_EXIT:
-                log.debug("dlm_fencing_daemon: MSG_EXIT")
-                log.debug("dlm_fencing_daemon: closing WD device")
+                log.debug("dlm_fence_daemon: MSG_EXIT")
+                log.debug("dlm_fence_daemon: closing WD device")
                 os.write(wd, "V")
                 os.close(wd)
-                log.debug("dlm_fencing_daemon: writing MSG_EXIT_ACK")
+                log.debug("dlm_fence_daemon: writing MSG_EXIT_ACK")
                 ret = block_write(bd, BLK_SIZE * ((2 * n) + 1), MSG_EXIT_ACK)
                 return
+        d.close()
         util.unlock_file("SSSS", f)
         os.write(wd, "w")
         time.sleep(1)
@@ -74,20 +98,30 @@ def dlm_fencing_daemon(node_id):
 def dlm_fence_node(node_id):
     n = int(node_id)
     log.debug("dlm_fence_node node_id=%d" % n)
-    f = util.lock_file("SSSS", "/var/run/sr-ref/dlmref", "r+")
-    file_content = f.readlines()
-    for line in file_content:
-        bd = "/dev/" + line.rstrip() + "/sbd"
+    f = util.lock_file("dlm_fence_node", DLMREF_LOCK, "r+")
+    d = shelve.open(DLMREF)
+    klist = d.keys()
+    for key in klist:
+        bd = "/dev/" + key + "/sbd"
         ret = block_write(bd, BLK_SIZE * 2 * n, MSG_FENCE)
+    d.close()
+    util.unlock_file("dlm_fence_node", f)
     # Wait for an ACK for WD_TIMEOUT + 10 seconds or assume 
     # node has been fenced
     for i in range(1, WD_TIMEOUT + 10):
-        for line in file_content:
-            bd = "/dev/" + line.rstrip() + "/sbd"
+        f = util.lock_file("dlm_fence_node", DLMREF_LOCK, "r+")
+        d = shelve.open(DLMREF)
+        klist = d.keys()
+        for key in klist:
+            bd = "/dev/" + key + "/sbd"
             ret = block_read(bd, BLK_SIZE * ((2 * n) + 1))
             if ret == MSG_FENCE_ACK:
-                log.debug("dlm_fence_node got ACK for node_id=%d" % n)
-                return
+                log.debug("dlm_fence_node got MSG_FENCE_ACK for node_id=%d" % n)
+                time.sleep(2)
+                util.unlock_file("dlm_fence_node", f)
+                exit(0)
+        d.close()
+        util.unlock_file("dlm_fence_node", f)
         time.sleep(1)
 
 def dlm_fence_clear_by_id(node_id, scsi_id):
@@ -99,34 +133,44 @@ def dlm_fence_clear_by_id(node_id, scsi_id):
     ret = block_write(bd, BLK_SIZE * ((2 * n) + 1), MSG_OK)
 
 def dlm_fence_daemon_stop(node_id):
-    n = int(node_id)
-    log.debug("dlm_fence_daemon_stop node_id=%d" % n)
-    f = util.lock_file("SSSS", "/var/run/sr-ref/dlmref", "r+")
-    file_content = f.readlines()
-    for line in file_content:
-        bd = "/dev/" + line.rstrip() + "/sbd"
-        ret = block_write(bd, BLK_SIZE * 2 * n, MSG_EXIT)
-    # Wait for an ACK for WD_TIMEOUT + 10 seconds or assume
-    # node has been fenced
-    for i in range(1, WD_TIMEOUT + 10):
-        for line in file_content:
-            bd = "/dev/" + line.rstrip() + "/sbd"
-            ret = block_read(bd, BLK_SIZE * ((2 * n) + 1))
-            if ret == MSG_EXIT_ACK:
-                log.debug("dlm_fence_daemon_stop got MSG_EXIT_ACK for node_id=%d" % n)
-                return
-        time.sleep(1)
-    
+    with open("/var/run/sr-ref/dlm_fence_daemon.pickle") as f:
+        dlm_fence_daemon = pickle.load(f)
+    dlm_fence_daemon.send_signal(signal.SIGUSR1)
+    dlm_fence_daemon.wait()
+    os.unlink("/var/run/sr-ref/dlm_fence_daemon.pickle")
+    return
+
+def dlm_fence_daemon_start(node_id):
+    import subprocess
+    args = ['/usr/libexec/xapi-storage-script/volume/org.xen.xapi.storage.gfs2/fence_tool.py',
+            "dlm_fence_daemon", str(node_id)]
+    dlm_fence_daemon = subprocess.Popen(args)
+    log.debug("dlm_fence_daemon_start: node_id=%d" % node_id)
+    with open("/var/run/sr-ref/dlm_fence_daemon.pickle", 'w+') as f:
+        pickle.dump(dlm_fence_daemon, f)
+
+def dlm_fence_no_args():
+    log.debug("dlm_fence_no_args")
+    for line in sys.stdin:
+        log.debug("dlm_fence_no_args: %s" % line)
+        if line.startswith("node="):
+            node_id = int(int(line[5:]) % 4096)
+    dlm_fence_node(node_id)
 
 if __name__ == "__main__":
-    cmd = sys.argv[1]
-    if cmd == "dlm_fencing_daemon":
-        dlm_fencing_daemon(sys.argv[2])
-    elif cmd == "dlm_fence_daemon_stop":
-        dlm_fence_daemon_stop(sys.argv[2])
-    elif cmd == "dlm_fence_node":
-        dlm_fence_node(sys.argv[2])
-    elif cmd == "dlm_fence_clear_by_id":
-        dlm_fence_clear_by_id(sys.argv[2], sys.argv[3])
+    if len(sys.argv) == 1:
+        dlm_fence_no_args()
+    else:
+        cmd = sys.argv[1]
+        if cmd == "dlm_fence_daemon":
+            dlm_fence_daemon(sys.argv[2])
+        elif cmd == "dlm_fence_daemon_stop":
+            dlm_fence_daemon_stop(sys.argv[2])
+        elif cmd == "dlm_fence_node":
+            dlm_fence_node(sys.argv[2])
+        elif cmd == "dlm_fence_clear_by_id":
+            dlm_fence_clear_by_id(sys.argv[2], sys.argv[3])
+        elif cmd == "dlm_fence_print":
+            dlm_fence_print()
                    
 

@@ -17,6 +17,7 @@ import json
 import xcp.environ
 import XenAPI
 from xapi.storage.libs import util
+import fence_tool
 
 # For a block device /a/b/c, we will mount it at <mountpoint_root>/a/b/c
 mountpoint_root = "/var/run/sr-mount/"
@@ -168,6 +169,11 @@ def find_if_gfs2(impl, dbg, uri):
 
     return srs
 
+def get_node_id(dbg):
+    cmd = ["/usr/sbin/corosync-cfgtool", "-s"]
+    output = call(dbg, cmd)
+    return int(int(output.splitlines()[1][14:]) % 4096)
+
 class Implementation(xapi.storage.api.volume.SR_skeleton):
 
     def probe(self, dbg, uri):
@@ -234,7 +240,7 @@ class Implementation(xapi.storage.api.volume.SR_skeleton):
 
 
     def attach(self, dbg, uri):
-        import socket, struct
+        import shelve
         log.debug("%s: SR.attach: uri=%s" % (dbg, uri))
 
         # Notify other pool members we have arrived
@@ -270,28 +276,31 @@ class Implementation(xapi.storage.api.volume.SR_skeleton):
         cmd = ["/usr/sbin/lvchange", "-ay", unique_id + "/sbd"]
         call(dbg, cmd)
 
-        # Fixme: start fencing daemon
-
-        sbd_dev_path = "/dev/" + unique_id + "/sbd"
+        # initialise region on sbd for fencing daemon
+        node_id = get_node_id(dbg)
+        fence_tool.dlm_fence_clear_by_id(node_id, unique_id)
 
         # Lock refcount file before starting dlm
         if not os.path.exists(DLM_REFDIR):
             os.mkdir(DLM_REFDIR)
         dlmref = os.path.join(DLM_REFDIR, "dlmref")
 
-        f = util.lock_file(dbg, dlmref, "a+")
+        f = util.lock_file(dbg, dlmref + ".lock", "a+")
 
-        # Increment refcount
-        found = False
-        for line in f.readlines():
-            if line.find(unique_id) != -1:
-                found = True
-        if not found:
-            f.write("%s\n" % unique_id)
+        d = shelve.open(dlmref)
+        klist = d.keys()
+        previous = len(klist)
+        d[str(unique_id)] = 0
+        d.close()
 
-        # start dlm should be idempotent
-        cmd = ["/usr/bin/systemctl", "start", "dlm"]
-        call(dbg, cmd)
+        log.debug("previous_scsi_ids=%d" % previous)
+        if previous == 0:
+            # Start fencing daemon
+            log.debug("Calling dlm_fence_daemon_start: node_id=%d" % node_id)
+            fence_tool.dlm_fence_daemon_start(node_id)
+            # start dlm
+            cmd = ["/usr/bin/systemctl", "start", "dlm"]
+            call(dbg, cmd)
 
         util.unlock_file(dbg, f)
 
@@ -349,11 +358,6 @@ class Implementation(xapi.storage.api.volume.SR_skeleton):
         # activate sbd LV
         cmd = ["/usr/sbin/lvchange", "-ay", unique_id + "/sbd"]
         call(dbg, cmd)
-
-        # format sbd device
-        sbd_dev_path = "/dev/" + unique_id + "/sbd"
-        #cmd = ["/usr/sbin/sbd", "-d", sbd_dev_path, "create"]
-        #call(dbg, cmd)
 
         # deactivate sbd LV
         cmd = ["/usr/sbin/lvchange", "-an", unique_id + "/sbd"]
@@ -429,6 +433,7 @@ class Implementation(xapi.storage.api.volume.SR_skeleton):
         return self.detach(dbg, sr)
 
     def detach(self, dbg, sr):
+        import shelve
         # Get the iSCSI uri from the SR metadata
         uri = getFromSRMetadata(dbg, sr, 'uri')
 
@@ -447,21 +452,22 @@ class Implementation(xapi.storage.api.volume.SR_skeleton):
 
         dlmref = os.path.join(DLM_REFDIR, "dlmref")
 
-        f = util.lock_file(dbg, dlmref, "r+")
+        f = util.lock_file(dbg, dlmref + ".lock", "r+")
 
-        refcount = 0
-        file_content = f.readlines()
-        f.seek(0,0)
-        for line in file_content:
-            if line.find(unique_id) == -1:
-                f.write(line)
-                refcount += 1
-        f.truncate()
+        d = shelve.open(dlmref)
+        del d[str(unique_id)]
+        klist = d.keys()
+        current = len(klist)
+        d.close()
 
-        if not refcount:
-            os.unlink(dlmref)
+        if current == 0:
             cmd = ["/usr/bin/systemctl", "stop", "dlm"]
             call(dbg, cmd)
+
+            # stop fencing daemon
+            node_id = get_node_id(dbg)
+            log.debug("Calling dlm_fence_daemon_stop: node_id=%d" % node_id)
+            fence_tool.dlm_fence_daemon_stop(node_id)
 
         util.unlock_file(dbg, f)
 
