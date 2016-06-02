@@ -172,7 +172,7 @@ class Implementation(xapi.storage.api.volume.SR_skeleton):
 
     def probe(self, dbg, uri):
         uris = []
-
+        srs = []
         u = urlparse.urlparse(uri)
         if u.scheme == None:
             raise xapi.storage.api.volume.SR_does_not_exist(
