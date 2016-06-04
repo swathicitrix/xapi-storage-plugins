@@ -39,9 +39,12 @@ htmlcov/
 .coverage
 .coverage.*
 .cache
-nosetests.xml
+nosetests*.xml
 coverage.xml
 *,cover
+
+# python virtual env
+.env
 
 # Translations
 *.mo
@@ -55,3 +58,6 @@ docs/_build/
 
 # PyBuilder
 target/
+
+# Emacs backup files
+*~

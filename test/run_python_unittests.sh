@@ -1,0 +1,62 @@
+#!/bin/bash
+#set -eux # for debug only
+set -eu
+
+PLUGINROOT=$(cd $(dirname $0) && cd .. && pwd)
+ENVDIR="$PLUGINROOT/.env"
+TESTROOT="$PLUGINROOT/test"
+
+set +u
+. "$ENVDIR/bin/activate"
+set -u
+
+(
+    cd "$PLUGINROOT"
+
+    LIBDIRS=`find $PLUGINROOT/libs -maxdepth 1 -type d | tr '\n' ' '`
+    LIBTESTS=`find $PLUGINROOT/test/libs -name \*Test.py`
+
+    # Run pylint over the code under test first
+    #pylint $SOURCE
+
+    # clear the coverage
+    coverage erase
+
+    # Test the libs
+    PYTHONPATH="`echo "$LIBDIRS" | tr ' ' ':'`" \
+    coverage run $(which nosetests) \
+        --with-xunit                \
+        --xunit-file=nosetests-libs.xml  \
+        $LIBTESTS
+
+    # Test datapath plugins
+    DATAPATHDIRS=`find $PLUGINROOT/datapath -maxdepth 1 -type d | tr '\n' ' '`
+    DATAPATHTESTROOT="$TESTROOT/datapath"
+    for datapath in $DATAPATHDIRS; do
+        LEAF=$(basename $datapath)
+        # if test folder exists
+        if [ -d "$DATAPATHTESTROOT/$LEAF" ]; then
+            # run nosetest for this datapath folder (use coverage -a)
+            echo "Found test folder for $LEAF"
+        fi
+    done
+
+    # Test volume plugins
+    VOLUMEDIRS=`find $PLUGINROOT/volume -maxdepth 1 -type d  | tr '\n' ' '`
+    VOLUMETESTROOT="$TESTROOT/volume"
+    for volume in $VOLUMEDIRS; do
+        LEAF=$(basename $volume)
+        # if test folder exists
+        if [ -d "$DATAPATHTESTROOT/$LEAF" ]; then
+            # run nosetest for this volume folder
+            echo "Found test folder for $LEAF"
+        fi
+    done
+
+    SOURCEDIRS="$DATAPATHDIRS $VOLUMEDIRS $LIBDIRS"
+
+    SOURCE=`find $SOURCEDIRS -name \*.py | tr '\n' ','`
+
+    coverage report --include="$SOURCE"
+    coverage xml --include="$SOURCE"
+)
