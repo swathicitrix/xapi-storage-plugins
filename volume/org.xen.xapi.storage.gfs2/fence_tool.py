@@ -19,8 +19,6 @@ BLK_SIZE = 512
 MSG_OK        = '\x00'
 MSG_FENCE     = '\x01'
 MSG_FENCE_ACK = '\x02'
-MSG_EXIT      = '\x03'
-MSG_EXIT_ACK  = '\x04'
 
 WD_TIMEOUT = 60
 
@@ -74,21 +72,13 @@ def dlm_fence_daemon(node_id):
                 log.debug("dlm_fence_daemon: MSG_OK")
             elif ret == MSG_FENCE:
                 log.debug("dlm_fence_daemon: MSG_FENCE")
-                log.debug("dlm_fence_daemon: Settingo WD to 1 second")
+                log.debug("dlm_fence_daemon: Settingo WD timeout to 1 second")
                 s = struct.pack ("i", 1)
                 fcntl.ioctl(wd, 3221509894 , s)
                 log.debug("dlm_fence_daemon: writing MSG_FENCE_ACK")
                 ret = block_write(bd, BLK_SIZE * ((2 * n) + 1), MSG_FENCE_ACK)
                 log.debug("dlm_fence_daemon: MSG_FENCE_ACK sent")
                 # force reboot here
-                return
-            elif ret == MSG_EXIT:
-                log.debug("dlm_fence_daemon: MSG_EXIT")
-                log.debug("dlm_fence_daemon: closing WD device")
-                os.write(wd, "V")
-                os.close(wd)
-                log.debug("dlm_fence_daemon: writing MSG_EXIT_ACK")
-                ret = block_write(bd, BLK_SIZE * ((2 * n) + 1), MSG_EXIT_ACK)
                 return
         d.close()
         util.unlock_file("SSSS", f)

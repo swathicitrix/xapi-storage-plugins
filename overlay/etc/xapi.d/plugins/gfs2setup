@@ -90,8 +90,11 @@ def reloadCorosync(session, pool_uuid):
     sysconfigdlm.write("DLM_CONTROLD_OPTS=\"--enable_fencing=1 --enable_quorum_fencing=1 -K\"\n")
     sysconfigdlm.close()
 
-    conf = """fence_all /usr/libexec/xapi-storage-script/volume/org.xen.xapi.storage.gfs2/fence_tool.py dlm_fence_print
+    conf = """fence_all /usr/libexec/xapi-storage-script/volume/org.xen.xapi.storage.gfs2/fence_tool.py
 """
+    if not os.path.exists("/etc/dlm"):
+        os.mkdir("/etc/dlm")
+
     dlmconf = open("/etc/dlm/dlm.conf", "w")
     dlmconf.write(conf)
     dlmconf.close()
