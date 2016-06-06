@@ -1,5 +1,4 @@
-import xapi.storage.api.volume
-from xapi.storage import log
+from xapi.storage.libs import log
 import XenAPI
 
 
@@ -33,10 +32,11 @@ def call_plugin_in_pool(dbg, plugin_name, plugin_function, args):
                 args)
             log.debug("%s: resulttext = %s" % (dbg, resulttext))
             if resulttext != "True":
+                pass
                 # ToDo: We ought to raise something else
-                raise xapi.storage.api.volume.Unimplemented(
-                    "Failed to get hostref %s to run %s(%s)" %
-                    (host_ref, plugin_name, plugin_function, args))
+                #raise xapi.storage.api.volume.Unimplemented(
+                #    "Failed to get hostref %s to run %s(%s)" %
+                #    (host_ref, plugin_name, plugin_function, args))
     except:
         # ToDo: We ought to raise something else
         raise
@@ -64,10 +64,11 @@ def call_plugin_on_host(dbg, host_name, plugin_name, plugin_function, args):
                     args)
                 log.debug("%s: resulttext = %s" % (dbg, resulttext))
                 if resulttext != "True":
+                    pass
                     # ToDo: We ought to raise something else
-                    raise xapi.storage.api.volume.Unimplemented(
-                        "Failed to get hostref %s to run %s(%s)" %
-                        (host_ref, plugin_name, plugin_function, args))
+                    #raise xapi.storage.api.volume.Unimplemented(
+                    #    "Failed to get hostref %s to run %s(%s)" %
+                    #    (host_ref, plugin_name, plugin_function, args))
     except:
         # ToDo: We ought to raise something else
         raise

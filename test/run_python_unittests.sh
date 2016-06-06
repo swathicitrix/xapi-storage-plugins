@@ -6,6 +6,17 @@ PLUGINROOT=$(cd $(dirname $0) && cd .. && pwd)
 ENVDIR="$PLUGINROOT/.env"
 TESTROOT="$PLUGINROOT/test"
 
+function finish {
+    (
+        cd "$PLUGINROOT"/libs
+        if [ -h xapi ]; then rm xapi; fi
+        if [ -h storage ]; then rm storage; fi
+        if [ -h libs ]; then rm libs; fi
+    )
+}
+
+trap finish EXIT
+
 set +u
 . "$ENVDIR/bin/activate"
 set -u
@@ -21,6 +32,17 @@ set -u
 
     # clear the coverage
     coverage erase
+
+    # Create some namespace symlink
+    (
+        cd "$PLUGINROOT"/libs
+        if [ -h xapi ]; then rm xapi; fi
+        ln -s . xapi
+        if [ -h storage ]; then rm storage; fi
+        ln -s . storage
+        if [ -h libs ]; then rm libs; fi
+        ln -s . libs
+    )
 
     # Test the libs
     PYTHONPATH="`echo "$LIBDIRS" | tr ' ' ':'`" \
@@ -60,3 +82,4 @@ set -u
     coverage report --include="$SOURCE"
     coverage xml --include="$SOURCE"
 )
+

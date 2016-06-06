@@ -6,11 +6,9 @@ import signal
 # from python-fdsend
 # import fdsend
 
-import xapi
 import image
-import xapi.storage.api.volume
-from xapi.storage.common import call
-from xapi.storage import log
+from xapi.storage.libs.util import call
+from xapi.storage.libs import log
 import pickle
 import urlparse
 
@@ -123,8 +121,9 @@ def create(dbg):
         minor = int(output[len(prefix):])
     if minor is None:
         os.kill(pid, signal.SIGQUIT)
-        raise xapi.InternalError("tap-ctl allocate returned unexpected " +
-                                 "output: %s" % (output))
+        # TODO: FIXME:  break link to XAPI
+        #raise xapi.InternalError("tap-ctl allocate returned unexpected " +
+        #                         "output: %s" % (output))
     call(dbg, ["tap-ctl", "attach", "-m", str(minor), "-p", str(pid)])
     return Tapdisk(minor, pid, None)
 
@@ -138,7 +137,9 @@ def find_by_file(dbg, f):
         tap = load_tapdisk_metadata(dbg, f.path)
         log.debug("%s: returning td %s" % (dbg, tap))
         return tap
-    except xapi.storage.api.volume.Volume_does_not_exist:
+    # TODO: FIXME: Sort this error out
+    #except xapi.storage.api.volume.Volume_does_not_exist:
+    except OSError:
         pass
 
 def _metadata_dir(path):
@@ -163,7 +164,8 @@ def load_tapdisk_metadata(dbg, path):
     filename = dirname + "/" + TD_PROC_METADATA_FILE
     if not(os.path.exists(filename)):
         # XXX throw a better exception
-        raise xapi.storage.api.volume.Volume_does_not_exist(dirname)
+        raise Exception('volume doesn\'t exist')
+        #raise xapi.storage.api.volume.Volume_does_not_exist(dirname)
     with open(filename, "r") as fd:
         meta = pickle.load(fd)
         tap = Tapdisk(meta['minor'], meta['pid'], meta['f'])

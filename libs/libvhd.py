@@ -5,17 +5,12 @@ import sqlite3
 import os
 import urlparse
 import sys
-from xapi.storage.common import call
-from xapi.storage import log
+from xapi.storage.libs import util
+from xapi.storage.libs.util import call
+from xapi.storage.libs import log
 import xapi.storage.libs.poolhelper
-import xapi.storage.api.datapath
-import xapi.storage.api.volume
 from xapi.storage.libs import tapdisk, image
 from contextlib import contextmanager
-
-#FIXME: these should go since are a layering violation
-import xcp.environ
-import XenAPI
 
 DP_URI_PREFIX = "vhd+tapdisk://"
 OPT_LOG_ERR = "--debug"
@@ -286,11 +281,7 @@ def attach(dbg, uri, domain, cb):
         }
 
 def activate(dbg, uri, domain, cb):
-    inventory = xcp.environ.readInventory()
-    session = XenAPI.xapi_local()
-    session.xenapi.login_with_password("root", "")
-    this_host = session.xenapi.host.get_by_uuid(inventory.get("INSTALLATION_UUID"))
-    this_host_label = session.xenapi.host.get_name_label(this_host)
+    this_host_label = util.get_current_host()
 
     sr,name = parse_datapath_uri(uri)
     opq = cb.volumeStartOperations(sr, 'w')
