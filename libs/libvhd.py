@@ -18,7 +18,7 @@ OPT_LOG_ERR = "--debug"
 MSIZE_MB = 2 * 1024 * 1024
 
 def create_metabase(path):
-    metabase = VhdMetabase(path)
+    metabase = VhdMetabase.VhdMetabase(path)
     metabase.create()
     metabase.close()
 
