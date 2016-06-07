@@ -9,12 +9,18 @@ from xapi.storage.libs import util
 from xapi.storage.libs.util import call
 from xapi.storage.libs import log
 import xapi.storage.libs.poolhelper
+from xapi.storage.libs import VhdMetabase
 from xapi.storage.libs import tapdisk, image
 from contextlib import contextmanager
 
 DP_URI_PREFIX = "vhd+tapdisk://"
 OPT_LOG_ERR = "--debug"
 MSIZE_MB = 2 * 1024 * 1024
+
+def create_metabase(path):
+    metabase = VhdMetabase(path)
+    metabase.create()
+    metabase.close()
 
 def create(dbg, sr, name, description, size, cb):
 

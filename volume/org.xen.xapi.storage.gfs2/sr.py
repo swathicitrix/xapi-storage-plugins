@@ -387,16 +387,8 @@ class Implementation(xapi.storage.api.volume.SR_skeleton):
         # Temporarily mount the filesystem so we can write the SR metadata
         mnt_path = mount_local(dbg, gfs2_dev_path)
 
-        # FIXME: Move DB specific code to another place
-        # create metadata DB
-        import sqlite3
-        conn = sqlite3.connect(mnt_path + "/sqlite3-metadata.db")
-        with conn:
-            conn.execute("create table VDI(key integer primary key, snap int,"
-                         "parent int, name text, description text, vsize text,"
-                         "uuid text, active_on text, gc_status text, nonpersistent integer)")
-            # TODO: define indexes, parent, uuid, (active_on?)
-        conn.close()
+        # Create the metadata database
+        libvhd.create_metabase(mnt_path + "/sqlite3-metadata.db")
 
         read_caching = True
         if 'read_caching' in configuration:
