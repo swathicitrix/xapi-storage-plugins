@@ -19,10 +19,12 @@ def get_format(dbg, dev_path):
     # FIXME:Check path exists
 
     cmd = ["/usr/sbin/blkid", "-s", "TYPE", dev_path]
-    output = call(dbg, cmd)
-    # output should look like
-    # <dev_path>: TYPE="<type>"
-    format_type = output.split(":")[1].split("=")[1].strip(' \t\n\r')
-    format_type = format_type[1:-1]
-
+    try:
+        output = call(dbg, cmd)
+        # output should look like
+        # <dev_path>: TYPE="<type>"
+        format_type = output.split(":")[1].split("=")[1].strip(' \t\n\r')
+        format_type = format_type[1:-1]
+    except:
+        format_type = ""
     return format_type
