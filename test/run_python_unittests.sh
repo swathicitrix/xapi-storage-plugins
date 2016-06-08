@@ -75,7 +75,7 @@ set -u
         fi
     done
 
-    SOURCEDIRS="$DATAPATHDIRS $VOLUMEDIRS $LIBDIRS"
+    SOURCEDIRS="$DATAPATHDIRS $VOLUMEDIRS $LIBDIRS $TESTROOT"
 
     SOURCE=`find $SOURCEDIRS -name \*.py | tr '\n' ','`
 
