@@ -5,7 +5,7 @@ DBL_MIN = -DBL_MAX
 INF = float('inf')
 N_INF = float('-inf')
 
-DS_TYPE_VALS = frozenset(('absolute', 'rate', 'absolute_to_rate'))
+DS_TYPE_VALS = frozenset(('gauge', 'absolute', 'derive'))
 VAL_TYPE_VALS = frozenset(('float', 'int64'))
 
 # Mapping of datasource value types to C types
@@ -21,12 +21,12 @@ DEFAULTS = {
     'name': '<empty>',
     'value': 0.0,
     'description': '',
-    'type': 'absolute',
+    'type': 'gauge',
     'min': N_INF,
     'max': INF,
     'units': '',
     'value_type': 'float',
-    'owner': 'Host'
+    'owner': 'host'
 }
 
 # TODO: move this to some kind of
@@ -99,7 +99,7 @@ class Datasource(object):
             self,
             name,
             value,
-            value_type=None,
+            value_type,
             description=None,
             datasource_type=None,
             min_val=None,
@@ -114,14 +114,13 @@ class Datasource(object):
             raise TypeError("'name' is not of type 'string'")
         self.__data['name'] = name
 
-        if value_type is not None:
-            if value_type not in VAL_TYPE_VALS:
-                raise ValueError(
-                    "'value_type' not one of '{}'".format(
-                        ', '.join(VAL_TYPE_VALS)
-                    )
+        if value_type not in VAL_TYPE_VALS:
+            raise ValueError(
+                "'value_type' not one of '{}'".format(
+                    ', '.join(VAL_TYPE_VALS)
                 )
-            self.__data['value_type'] = value_type
+            )
+        self.__data['value_type'] = value_type
 
         c_val_type = 'int64_t' if value_type == 'int64' else 'double'
 
@@ -189,10 +188,10 @@ class Datasource(object):
     @staticmethod
     def __is_valid_owner(owner):
         tmp = owner.split(' ')
-        if len(tmp) == 1 and tmp[0] == 'Host':
+        if len(tmp) == 1 and tmp[0] == 'host':
             return True
         elif (len(tmp) == 2 and
-                (tmp[0] == 'VM' or tmp[0] == 'SR') and
+                (tmp[0] == 'vm' or tmp[0] == 'sr') and
                 is_valid_uuid4(tmp[1])):
             return True
 

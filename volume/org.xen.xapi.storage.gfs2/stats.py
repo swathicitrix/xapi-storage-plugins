@@ -43,12 +43,12 @@ def create_datasource_dict(stats_dict, scsi_id):
             0.0,
             'float',
             description='SR ' + scsi_id + ' utilization',
-            datasource_type='absolute',
+            datasource_type='gauge',
             min_val=0.0,
             max_val=100.0,
             units='(fraction)',
             #owner='sr ' + sr_uuid
-            owner='Host'
+            owner='host'
         )
 
     return ds_dict
