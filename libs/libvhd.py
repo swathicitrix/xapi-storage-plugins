@@ -6,6 +6,7 @@ import os
 import urlparse
 import sys
 from xapi.storage.libs import util
+from xapi.storage.libs import vhdutil
 from xapi.storage.libs.util import call
 from xapi.storage.libs import log
 import xapi.storage.libs.poolhelper
@@ -45,22 +46,20 @@ def create(dbg, sr, name, description, size, cb):
         cb.volumeActivateLocal(opq, vol_name)
 
         # Create the VHD
-        cmd = ["/usr/bin/vhd-util", "create", "-n", vol_path,
-               "-s", str(size_mib), "-S", str(MSIZE_MB)]
-        call(dbg, cmd)
+        vhdutil.create(vol_path, size_mib)
 
         cb.volumeDeactivateLocal(opq, vol_name)
 
         # Fetch physical utilisation
         psize = cb.volumeGetPhysSize(opq, vol_name)
 
-        vol_uri = cb.getVolumeURI(opq, vol_name)
+        vol_uri = cb.getVolumeUriPrefix(opq) + vol_uuid
         cb.volumeStopOperations(opq)
 
     conn.close()
 
     return {
-        "key": vol_name,
+        "key": vol_uuid,
         "uuid": vol_uuid,
         "name": name,
         "description": description,
@@ -78,8 +77,9 @@ def destroy(dbg, sr, key, cb):
     conn = connectSQLite3(meta_path)
     with Lock(opq, "gl", cb):
         with write_context(conn):
-            cb.volumeDestroy(opq, key)
-            res = conn.execute("delete from VDI where rowid = (?)", (int(key),))
+            vdi = getVdi(uuid=key)
+            cb.volumeDestroy(opq, str(vdi.rowid))
+            res = conn.execute("delete from VDI where rowid = (?)", (vdi.rowid,))
         conn.close()
     cb.volumeStopOperations(opq)
 
@@ -91,25 +91,72 @@ def resize(dbg, sr, key, new_size, cb):
     vsize = size_mib * 1048576
 
     opq = cb.volumeStartOperations(sr, 'w')
-    key_path = cb.volumeGetPath(opq, key)
+    vol_path = cb.volumeGetPath(opq, key)
     meta_path = cb.volumeMetadataGetPath(opq)
 
     conn = connectSQLite3(meta_path)
     with write_context(conn):
         conn.execute("update VDI set vsize = (?) where rowid = (?)", (str(vsize), int(key),))
         cb.volumeResize(opq, key, vsize)
-        cmd = ["/usr/bin/vhd-util", "resize", "-n", key_path,
-               "-s", str(size_mib), "-f"] 
-        call(dbg, cmd)
+        vhdutil.resize(dbg, vol_path, size_mib)
 
     conn.close()
     cb.volumeStopOperations(opq)
 
 def clone(dbg, sr, key, cb):
+
+    vdi.uuid
+    vdi.name
+    vdi.desc
+    vdi.vhd
+
+    vhd.id
+    vhd.parent_id
+    vhd.vsize
+    vhd.psize
+
+    vdi.vhd.id
+
+    db_start()
+    vdi = db_get_vdi(key)
+    vol_path = cb.volumeGetPath(opq, vdi.vhd.id)
+
+    snap_uuid = str(uuid.uuid4())
+    snap_vhd = db_add_vhd(parent=vdi.vhd.parent_id)
+    snap_path = cb.volumeCreate(opq, snap_vhd.id, vdi.vhd.vsize)
+    vhdutil.snapshot(dbg, vol_path, snap_path)
+    db_add_vdi(snap_uuid, vdi.name, vdi.desc, snap_vhd.id)
+    parent_path = os.path.basename(vhdutil.get_parent(dbg, snap_path).rstrip())
+    if parent_path[-12:] == vol_path[-12:]:
+        new_leaf_vhd = db_add_vhd(parent=vdi.vhd.id)
+        new_leaf_path = cb.volumeCreate(opq, new_leaf_vhd.id, vdi.vhd.vsize)
+        vhdutil.snapshot(dbg, vol_path, new_leaf_path)
+        db_update_vdi(vhd_id=new_leaf_vhd.id)
+    
+    refresh(vol_path, new_leaf_path)
+    
+
+    psize = cb.volumeGetPhysSize(opq, snap_vhd.id)
+    snap_uri = cb.getVolumeUriPrefix(opq) + snap_uuid
+    cb.volumeStopOperations(opq)
+
+    return {
+        "uuid": snap_uuid,
+        "key": snap_uuid,
+        "name": vdi.name,
+        "description": vdi.desc,
+        "read_write": True,
+        "virtual_size": vdi.vhd.vsize,
+        "physical_utilisation": psize,
+        "uri": [DP_URI_PREFIX + snap_uri],
+        "keys": {}
+    }
+
     snap_uuid = str(uuid.uuid4())
 
     opq = cb.volumeStartOperations(sr, 'w')
     meta_path = cb.volumeMetadataGetPath(opq)
+
     key_path = cb.volumeGetPath(opq, key)
 
     conn = connectSQLite3(meta_path)
@@ -125,9 +172,7 @@ def clone(dbg, sr, key, cb):
             snap_path = cb.volumeCreate(opq, snap_name, int(p_vsize))
         
             # Snapshot from key
-            cmd = ["/usr/bin/vhd-util", "snapshot",
-                   "-n", snap_path, "-p", key_path, "-S", str(MSIZE_MB)]
-            output = call(dbg, cmd)
+            vhdutil.snapshot(dbg, key_path, snap_path)
     
             # NB. As an optimisation, "vhd-util snapshot A->B" will check if
             #     "A" is empty. If it is, it will set "B.parent" to "A.parent"
@@ -135,8 +180,7 @@ def clone(dbg, sr, key, cb):
             #     If "B.parent" still points to "A", we need to rebase "A".
     
             # Fetch the parent of the newly created snapshot
-            cmd = ["/usr/bin/vhd-util", "query", "-n", snap_path, "-p"]
-            stdout = call(dbg, cmd)
+            stdout = vhdutil.get_parent(dbg, snap_path)
             parent_key = os.path.basename(stdout.rstrip())
 
             if parent_key[-12:] == key[-12:]:
@@ -152,14 +196,11 @@ def clone(dbg, sr, key, cb):
                 base_path = cb.volumeRename(opq, key, base_name)
                 cb.volumeCreate(opq, key, int(p_vsize))
 
-                cmd = ["/usr/bin/vhd-util", "snapshot",
-                       "-n", key_path, "-p", base_path, "-S", str(MSIZE_MB)]
-                output = call(dbg, cmd)
+                vhdutil.snapshot(dbg, key_path, base_path)
 
                 # Finally, update the snapshot parent to the rebased volume
-                cmd = ["/usr/bin/vhd-util", "modify",
-                       "-n", snap_path, "-p", base_path]
-                output = call(dbg, cmd)
+                vhdutil.set_parent(dbg, snap_path, base_path)
+
                 res = conn.execute("update VDI set parent = (?) where rowid = (?)",
                                    (int(base_name), int(snap_name),) )
                 res = conn.execute("update VDI set parent = (?) where rowid = (?)",
@@ -349,29 +390,6 @@ def clear_vdi_non_persistent(conn, name):
     conn.execute("update VDI set nonpersistent=NULL where rowid=:row",
                  {"row" : int(name)})
 
-def truncate_leaf_vhd(vol_path, dbg):
-    "zero out the disk (kill all data inside the VHD file)"
-    cmd = ["/usr/bin/vhd-util", "modify", OPT_LOG_ERR, "-z", "-n", vol_path]
-    call(dbg, cmd)
-
-def num_bits(val):
-    count = 0
-    while val:
-        count += val & 1
-        val = val >> 1
-    return count
-
-def count_bits(bitmap):
-    count = 0
-    for i in range(len(bitmap)):
-        count += num_bits(ord(bitmap[i]))
-    return count
-
-def vhd_is_empty(dbg, vol_path):
-    cmd = ["/usr/bin/vhd-util", "read", OPT_LOG_ERR, "-B", "-n", vol_path]
-    ret = call(dbg, cmd)
-    return count_bits(ret) == 0
-
 def create_single_clone(conn, sr, name, cb):
     pass
 
@@ -395,19 +413,19 @@ def epcopen(dbg, uri, persistent, cb):
                                   % (dbg, vol_path))
                         if (db_check_vdi_is_nonpersistent(dbg, conn, name)):
                             # Truncate, etc
-                            truncate_leaf_vhd(vol_path)
+                            vhdutil.reset(dbg, vol_path)
                             clear_vdi_non_persistent(conn, name)
                     elif (db_check_vdi_is_nonpersistent(dbg, conn, name)):
                         log.debug(
                             "%s: Datapath.epcopen: %s already marked non-persistent"
                             % (dbg, vol_path))
                         # truncate
-                        truncate_leaf_vhd(vol_path, dbg)
+                        vhdutil.reset(dbg, vol_path)
                     else:
                         log.debug("%s: Datapath.epcopen: %s is non-persistent"
                                   % (dbg, vol_path))
                         set_vdi_non_persistent(conn, name)
-                        if (not vhd_is_empty(dbg, vol_path)):
+                        if (not vhdutil.is_empty(dbg, vol_path)):
                             # Create single clone
                             create_single_clone(conn, sr, name, cb)
             except:
@@ -434,7 +452,7 @@ def epcclose(dbg, uri, cb):
             with write_context(conn):
                 if (db_check_vdi_is_nonpersistent(dbg, conn, name)):
                     # truncate
-                    truncate_leaf_vhd(vol_path, dbg)
+                    vhdutil.reset(dbg, vol_path)
                     clear_vdi_non_persistent(conn, name)
     except:
         log.error("%s: Datapath.epcclose: failed to complete close, %s"

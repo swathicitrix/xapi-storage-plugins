@@ -68,8 +68,8 @@ class Callbacks():
         pass
     def volumeMetadataGetPath(self, opq):
         return os.path.join(opq, "sqlite3-metadata.db")
-    def getVolumeURI(self, opq, name):
-        return "gfs2/" + opq + "|" + name
+    def getVolumeUriPrefix(self, opq):
+        return "gfs2/" + opq + "|"
     def getUniqueIdentifier(self, opq):
         log.debug("getUniqueIdentifier opq=%s" % opq)
         meta_path = os.path.join(opq, "meta.json")
