@@ -13,12 +13,13 @@ class VDI(object):
         self.vhd = VHD.fromrow(row)
 
 class VHD(object):
-    def __init__(self, vhd_id, parent, snap, vsize, psize):
+    def __init__(self, vhd_id, parent, snap, vsize, psize, gc_status = None):
         self.id = vhd_id
         self.parent_id = parent
         self.snap = snap
         self.vsize = vsize
         self.psize = psize
+        self.gc_status = gc_status
 
     def is_child_of(self, vhd_2):
         # CALL VHD_UTIL
@@ -32,7 +33,8 @@ class VHD(object):
                    row['parent_id'],
                    row['snap'],
                    row['vsize'],
-                   row['psize'])
+                   row['psize'],
+                   row['gc_status'])
 
 class VhdMetabase(object):
 
@@ -66,6 +68,11 @@ class VhdMetabase(object):
              "description": description,
              "vhd_id": vhd_id})
 
+    def delete_vdi(self, uuid):
+        self._conn.execute(
+            "DELETE FROM vdi WHERE uuid=:uuid",
+            {"uuid": uuid})
+
     def update_vdi_vhd_id(self, uuid, vhd_id):
         self.__update_vdi(uuid, "vhd_id", vhd_id)
 
@@ -90,6 +97,10 @@ class VhdMetabase(object):
 
     def insert_child_vhd(self, parent, vsize):
         return self.__insert_vhd(parent, None, vsize, None)
+
+    def delete_vhd(self, vhd_id):
+        self._conn.execute("DELETE FROM vhd WHERE id=:vhd_id",
+                           {"vhd_id": vhd_id})
 
     def update_vhd_parent(self, vhd_id, parent):
         self.__update_vhd(vhd_id, "parent_id", parent)
@@ -131,6 +142,14 @@ class VhdMetabase(object):
         for row in res:
             vdis.append(VDI(row))
         return vdis
+
+    def get_children(self, vhd_id):
+        res = self._conn.execute(
+            "SELECT * FROM vhd WHERE parent_id=:parent", {"parent": vhd_id})
+        vhds = []
+        for row in res:
+            vhds.append(VHD.fromrow(row))
+        return vhds
 
     def get_vhd_by_id(self, vhd_id):
         res = self._conn.execute("SELECT * from VHD where id=:id",

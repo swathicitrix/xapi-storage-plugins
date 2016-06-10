@@ -151,3 +151,36 @@ class VhdMetabaseTest(unittest.TestCase):
         vhd = self.subject.get_vhd_by_id(4)
 
         self.assertEquals(2, vhd.parent_id)
+
+    def test_get_children_with_results(self):
+        self.subject.populate_test_set_1()
+
+        vhds = self.subject.get_children(2)
+        self.assertEquals(1, len(vhds))
+
+    def test_get_children_no_results(self):
+        self.subject.populate_test_set_1()
+
+        vhds = self.subject.get_children(1)
+        self.assertEquals(0, len(vhds))
+
+    def test_delete_vdi_success(self):
+        self.subject.populate_test_set_1()
+
+        self.subject.delete_vdi(2)
+
+        vdis = self.subject.get_all_vdis()
+        self.assertEquals(1, len(vdis))
+
+    def test_delete_vhd_success(self):
+        self.subject.populate_test_set_1()
+
+        self.subject.insert_child_vhd(2, 24*1024)
+        children = self.subject.get_children(2)
+        self.assertEquals(2, len(children))
+
+        self.subject.delete_vhd(4)
+        children = self.subject.get_children(2)
+        self.assertEquals(1, len(children))
+
+ 
