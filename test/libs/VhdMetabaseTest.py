@@ -55,6 +55,12 @@ class VhdMetabaseTest(unittest.TestCase):
 
         self.assertEquals(None, vdi)
 
+    def test_vhd_get_by_missing_id_failure(self):
+        self.subject.populate_test_set_1()
+        vhd = self.subject.get_vhd_by_id(1000)
+
+        self.assertEquals(None, vhd)
+
     def test_get_all_vdi_success(self):
         self.subject.populate_test_set_1()
         vdis = self.subject.get_all_vdis()
@@ -105,3 +111,13 @@ class VhdMetabaseTest(unittest.TestCase):
         vdi = self.subject.get_vdi_by_id(2)
 
         self.assertEquals(4, vdi.vhd.id)
+
+    def test_update_vhd_parent_success(self):
+        self.subject.populate_test_set_1()
+        self.subject.insert_child_vhd(3, 20*1024)
+  
+        self.subject.update_vhd_parent(4, 2);
+        
+        vhd = self.subject.get_vhd_by_id(4)
+
+        self.assertEquals(2, vhd.parent_id)

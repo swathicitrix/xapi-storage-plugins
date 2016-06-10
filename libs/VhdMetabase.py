@@ -84,7 +84,7 @@ class VhdMetabase(object):
         return self.__insert_vhd(parent, None, vsize, None)
 
     def update_vhd_parent(self, vhd_id, parent):
-        self.__update_vhd(vhd_id, "parent", parent)
+        self.__update_vhd(vhd_id, "parent_id", parent)
 
     def update_vhd_vsize(self, vhd_id, vsize):
         self.__update_vhd(vhd_id, "vsize", vsize)
