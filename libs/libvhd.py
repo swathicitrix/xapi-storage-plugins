@@ -15,7 +15,6 @@ from xapi.storage.libs import tapdisk, image
 from contextlib import contextmanager
 
 DP_URI_PREFIX = "vhd+tapdisk://"
-OPT_LOG_ERR = "--debug"
 MSIZE_MB = 2 * 1024 * 1024
 
 def create_metabase(path):
@@ -23,50 +22,43 @@ def create_metabase(path):
     metabase.create()
     metabase.close()
 
-def create(dbg, sr, name, description, size, cb):
-
+def get_size_mb_and_vsize(size):
     # Calculate virtual size (round up size to nearest MiB)
     size = int(size)
     size_mib = size / 1048576
     if size % 1048576 != 0:
         size_mib = size_mib + 1
     vsize = size_mib * 1048576
+    return size_mib, vsize
+
+def create(dbg, sr, name, description, size, cb):
+    size_mib,vsize = get_size_mb_and_vsize(size)
 
     opq = cb.volumeStartOperations(sr, 'w')
     meta_path = cb.volumeMetadataGetPath(opq)
-    vol_uuid = str(uuid.uuid4())
+    vdi_uuid = str(uuid.uuid4())
 
-    conn = connectSQLite3(meta_path)
-    with write_context(conn):
-        res = conn.execute("insert into VDI(snap, name, description, uuid, vsize) values (?, ?, ?, ?, ?)", 
-                           (0, name, description, vol_uuid, str(vsize)))
-        vol_name = str(res.lastrowid)
+    db = VhdMetabase.VhdMetabase(meta_path)
+    with db.write_context():
+        vhd_id = db.insert_new_vhd(vsize)
+        db.insert_vdi(name, description, vdi_uuid, vhd_id)
+        vhd_path = cb.volumeCreate(opq, str(vhd_id), vsize)
+        vhdutil.create(vhd_path, size_mib)
+    db.close()
 
-        vol_path = cb.volumeCreate(opq, vol_name, size)
-        cb.volumeActivateLocal(opq, vol_name)
-
-        # Create the VHD
-        vhdutil.create(vol_path, size_mib)
-
-        cb.volumeDeactivateLocal(opq, vol_name)
-
-        # Fetch physical utilisation
-        psize = cb.volumeGetPhysSize(opq, vol_name)
-
-        vol_uri = cb.getVolumeUriPrefix(opq) + vol_uuid
-        cb.volumeStopOperations(opq)
-
-    conn.close()
+    psize = cb.volumeGetPhysSize(opq, vhd_id)
+    vdi_uri = cb.getVolumeUriPrefix(opq) + vol_uuid
+    cb.volumeStopOperations(opq)
 
     return {
-        "key": vol_uuid,
-        "uuid": vol_uuid,
+        "key": vdi_uuid,
+        "uuid": vdi_uuid,
         "name": name,
         "description": description,
         "read_write": True,
         "virtual_size": vsize,
         "physical_utilisation": psize,
-        "uri": [DP_URI_PREFIX + vol_uri],
+        "uri": [DP_URI_PREFIX + vdi_uri],
         "keys": {},
     }
 
@@ -74,66 +66,66 @@ def destroy(dbg, sr, key, cb):
     opq = cb.volumeStartOperations(sr, 'w')
     meta_path = cb.volumeMetadataGetPath(opq)
 
-    conn = connectSQLite3(meta_path)
+    db = VhdMetabase.VhdMetabase(meta_path)
     with Lock(opq, "gl", cb):
-        with write_context(conn):
-            vdi = getVdi(uuid=key)
-            cb.volumeDestroy(opq, str(vdi.rowid))
-            res = conn.execute("delete from VDI where rowid = (?)", (vdi.rowid,))
-        conn.close()
+        with db.write_context():
+            vdi = db.get_vdi_by_id(key)
+            db.delete_vdi(key)
+        with db.write_context():
+            cb.volumeDestroy(opq, str(vdi.vhd.id))
+            db.delete_vhd(vdi.vhd.id)
+        db.close()
     cb.volumeStopOperations(opq)
 
 def resize(dbg, sr, key, new_size, cb):
-    size = int(new_size)
-    size_mib = size / 1048576
-    if size % 1048576 != 0:
-        size_mib = size_mib + 1
-    vsize = size_mib * 1048576
+    size_mib,vsize = get_size_mb_and_vsize(new_size)
 
     opq = cb.volumeStartOperations(sr, 'w')
-    vol_path = cb.volumeGetPath(opq, key)
     meta_path = cb.volumeMetadataGetPath(opq)
 
-    conn = connectSQLite3(meta_path)
-    with write_context(conn):
-        conn.execute("update VDI set vsize = (?) where rowid = (?)", (str(vsize), int(key),))
-        cb.volumeResize(opq, key, vsize)
-        vhdutil.resize(dbg, vol_path, size_mib)
+    db = VhdMetabase.VhdMetabase(meta_path)
+    with db.write_context():
+        vdi = db.get_vdi_by_id(key)
+        db.update_vhd_vsize(vdi.vhd.id, None)
+    with db.write_context():
+        cb.volumeResize(opq, str(vdi.vhd.id), vsize)
+        vol_path = cb.volumeGetPath(opq, str(vdi.vhd.id))
+        vhdutil.resize(dbg, vol_path, size_mib)  
+        db.update_vhd_vsize(vdi.vhd.id, vsize)
+    db.close()
 
-    conn.close()
     cb.volumeStopOperations(opq)
 
 def clone(dbg, sr, key, cb):
+    snap_uuid = str(uuid.uuid4())
 
-    vdi.uuid
-    vdi.name
-    vdi.desc
-    vdi.vhd
-
-    vhd.id
-    vhd.parent_id
-    vhd.vsize
-    vhd.psize
-
-    vdi.vhd.id
-
-    db_start()
-    vdi = db_get_vdi(key)
+    opq = cb.volumeStartOperations(sr, 'w')
+    meta_path = cb.volumeMetadataGetPath(opq)
     vol_path = cb.volumeGetPath(opq, vdi.vhd.id)
 
-    snap_uuid = str(uuid.uuid4())
-    snap_vhd = db_add_vhd(parent=vdi.vhd.parent_id)
-    snap_path = cb.volumeCreate(opq, snap_vhd.id, vdi.vhd.vsize)
-    vhdutil.snapshot(dbg, vol_path, snap_path)
-    db_add_vdi(snap_uuid, vdi.name, vdi.desc, snap_vhd.id)
-    parent_path = os.path.basename(vhdutil.get_parent(dbg, snap_path).rstrip())
-    if parent_path[-12:] == vol_path[-12:]:
-        new_leaf_vhd = db_add_vhd(parent=vdi.vhd.id)
-        new_leaf_path = cb.volumeCreate(opq, new_leaf_vhd.id, vdi.vhd.vsize)
-        vhdutil.snapshot(dbg, vol_path, new_leaf_path)
-        db_update_vdi(vhd_id=new_leaf_vhd.id)
+    db = VhdMetabase.VhdMetabase(meta_path)
+    with Lock(opq, "gl", cb):
+        with db.write_context():
+            vdi = db.get_vdi_by_id(key)
+            snap_vhd = db_add_vhd(parent=vdi.vhd.parent_id)
+            snap_path = cb.volumeCreate(opq, snap_vhd.id, vdi.vhd.vsize)
+            vhdutil.snapshot(dbg, vol_path, snap_path)
+            db_add_vdi(snap_uuid, vdi.name, vdi.desc, snap_vhd.id)
+            parent_path = os.path.basename(vhdutil.get_parent(dbg, snap_path).rstrip())
+            if parent_path[-12:] == vol_path[-12:]:
+                new_leaf_vhd = db_add_vhd(parent=vdi.vhd.id)
+                new_leaf_path = cb.volumeCreate(opq, new_leaf_vhd.id, vdi.vhd.vsize)
+                vhdutil.snapshot(dbg, vol_path, new_leaf_path)
+                db_update_vdi(vhd_id=new_leaf_vhd.id)
     
-    refresh(vol_path, new_leaf_path)
+                refresh(vol_path, new_leaf_path)
+
+        db.close()
+
+
+
+    vdi = db_get_vdi(key)
+
     
 
     psize = cb.volumeGetPhysSize(opq, snap_vhd.id)
@@ -154,8 +146,6 @@ def clone(dbg, sr, key, cb):
 
     snap_uuid = str(uuid.uuid4())
 
-    opq = cb.volumeStartOperations(sr, 'w')
-    meta_path = cb.volumeMetadataGetPath(opq)
 
     key_path = cb.volumeGetPath(opq, key)
 
@@ -469,17 +459,14 @@ def connectSQLite3(db):
     return conn
 
 def startGC(dbg, sr_name, uri):
+    return
     import vhd_coalesce
     vhd_coalesce.startGC(dbg, sr_name, uri)
 
 def stopGC(dbg, sr_name, uri):
+    return
     import vhd_coalesce
     vhd_coalesce.stopGC(dbg, sr_name, uri)
-
-@contextmanager
-def write_context(conn):
-    with conn:
-        yield
 
 class Lock():
     def __init__(self, opq, name, cb):

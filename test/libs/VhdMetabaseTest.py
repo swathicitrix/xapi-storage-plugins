@@ -14,11 +14,16 @@ class StubVhdMetabase(VhdMetabase.VhdMetabase):
                 print row
 
     def populate_test_set_1(self):
+        """
+        TBD: Describe the data set
+        """
         with self.write_context():
-            id = self.insert_new_vdi("VDI1", "First VDI", str(uuid.uuid4()), 10*1024)
-            id = self.insert_new_vdi("VDI2", "Second VDI", None, 10*1024)
-            id = self.insert_child_vdi(id, "Child1", "First Child VDI", str(uuid.uuid4()), 10*1024)
-            pass
+            id = self.insert_new_vhd(10*1024)
+            self.insert_vdi("VDI1", "First VDI", str(1), id)
+
+            parent_id = self.insert_new_vhd(20*1024)
+            id = self.insert_child_vhd(parent_id, 20*1024)
+            self.insert_vdi("Child1", "First Child VDI", str(2), id)
 
 class VhdMetabaseTest(unittest.TestCase):
 
@@ -34,17 +39,24 @@ class VhdMetabaseTest(unittest.TestCase):
     
     def test_vdi_get_by_id_success(self):
         self.subject.populate_test_set_1()
-        vdi = self.subject.get_vdi_by_id(1)
+        vdi = self.subject.get_vdi_by_id("1")
 
-        self.assertEquals(1, vdi.key)
+        self.assertEquals(str(1), vdi.uuid)
+        self.assertEquals(1, vdi.vhd.id)
         self.assertEquals("VDI1", vdi.name)
         self.assertEquals("First VDI", vdi.description)
-        self.assertEquals(None, vdi.parent)
-        self.assertEquals(0, vdi.snap)
-        self.assertEquals(str(10*1024), vdi.vsize)
+        self.assertEquals(None, vdi.vhd.parent_id)
+        self.assertEquals(None, vdi.vhd.snap)
+        self.assertEquals(10*1024, vdi.vhd.vsize)
 
     def test_vdi_get_by_missing_id_failure(self):
         self.subject.populate_test_set_1()
         vdi = self.subject.get_vdi_by_id(1000)
 
         self.assertEquals(None, vdi)
+
+    def test_get_all_vdi_success(self):
+        self.subject.populate_test_set_1()
+        vdis = self.subject.get_all_vdis()
+
+        self.assertEquals(2, len(vdis))

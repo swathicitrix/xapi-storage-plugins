@@ -5,13 +5,18 @@ from contextlib import contextmanager
 
 class VDI(object):
     def __init__(self, row):
-        self.key = row['key']
-        self.name = row['name']
-        self.parent = row['parent']
-        self.description = row['description']
-        self.snap = row['snap']
         self.uuid = row['uuid']
+        self.name = row['name']
+        self.description = row['description']
+        self.vhd = VHD(row)
+
+class VHD(object):
+    def __init__(self, row):
+        self.id = row['id']
+        self.parent_id = row['parent_id']
+        self.snap = row['snap']
         self.vsize = row['vsize']
+        self.psize = row['psize']
 
 class VhdMetabase(object):
 
@@ -25,35 +30,83 @@ class VhdMetabase(object):
 
     def create(self):
         with self._conn:
-            self._conn.execute("create table VDI(key integer primary key, snap int,"
-                         "parent int, name text, description text, vsize text,"
-                         "uuid text, active_on text, gc_status text, nonpersistent integer)")
+            self._conn.execute("CREATE TABLE vhd(id INTEGER PRIMARY KEY, snap INTEGER, "
+                               "parent_id INTEGER, vsize INTEGER, psize INTEGER, gc_status TEXT)")
+            self._conn.execute("CREATE TABLE vdi(uuid text PRIMARY KEY, name TEXT, "
+                               "description TEXT, active_on TEXT, nonpersistent INTEGER, "
+                               "vhd_id NOT NULL, FOREIGN KEY(vhd_id) REFERENCES vhd(key))")
             # TODO: define indexes, parent, uuid, (active_on?)
 
-    def insert_new_vdi(self, name, description, uuid, vsize):
-        return self.__insert_vdi(None, name, description, uuid, vsize)
-
-    def insert_child_vdi(self, parent, name, description, uuid, vsize):
-        return self.__insert_vdi(parent, name, description, uuid, vsize)
-
-    def __insert_vdi(self, parent, name, description, uuid, vsize):
+    def insert_vdi(self, name, description, uuid, vhd_id):
         res = self._conn.execute(
-            "insert into VDI(snap, parent, name, description, uuid, vsize)"
-            " values (:snap, :parent, :name, :description,:uuid, :vsize)",
-            {"snap": 0,
-             "parent": parent,
+            "INSERT INTO vdi(uuid, name, description, vhd_id)"
+            " values (:uuid, :name, :description, :vhd_id)",
+            {"uuid": uuid,
              "name": name,
              "description": description,
-             "uuid": uuid,
-             "vsize": str(vsize)})
+             "vhd_id": vhd_id})
+
+    def update_vdi_vhd_id(self, uuid, vhd_id):
+        res = self._conn.execute(
+            "UPDATE vdi SET vhd_id"
+            " values (:vhd_id) WHERE uuid = :uuid",
+            {"vhd_id": vhd_id, "uuid": uuid})
+
+    def update_vdi_name(self, uuid, name):
+        res = self._conn.execute(
+            "UPDATE vdi SET name"
+            " values (:name) WHERE uuid = :uuid",
+            {"name": name, "uuid": uuid})
+
+    def update_vdi_description(self, uuid, description):
+        res = self._conn.execute(
+            "UPDATE vdi SET description"
+            " values (:description) WHERE uuid = :uuid",
+            {"description": description, "uuid": uuid})
+
+    def insert_new_vhd(self, vsize):
+        return self.__insert_vhd(None, None, vsize, None)
+
+    def insert_child_vhd(self, parent, vsize):
+        return self.__insert_vhd(parent, None, vsize, None)
+
+    def update_vhd_parent(self, vhd_id, parent):
+        self.__update_vhd(vhd_id, "parent", parent)
+
+    def update_vhd_vsize(self, vhd_id, vsize):
+        self.__update_vhd(vhd_id, "vsize", vsize)
+
+    def update_vhd_psize(self, vhd_id, psize):
+        self.__update_vhd(vhd_id, "psize", psize)
+
+    def __update_vhd(self, vhd_id, key, value):
+        query = "UPDATE vhd SET %s VALUES (?)" % key
+        res = self._conn.execute(query, (key))
+
+    def __insert_vhd(self, parent, snap, vsize, psize):
+        res = self._conn.execute(
+            "INSERT INTO vhd(parent_id, snap, vsize, psize) " 
+            "VALUES (:parent, :snap, :vsize, :psize)",
+            {"parent": parent,
+             "snap": snap,
+             "vsize": vsize,
+             "psize": psize})
         return res.lastrowid
 
-    def get_vdi_by_id(self, key_id):
-        res = self._conn.execute("select * from VDI where rowid=:row", {"row" : int(key_id)})
+    def get_vdi_by_id(self, vdi_uuid):
+        res = self._conn.execute("SELECT * FROM vdi INNER JOIN vhd ON vdi.vhd_id = vhd.id WHERE uuid=:uuid",
+                                 {"uuid" : vdi_uuid})
         row = res.fetchone()
         if (row):
             return VDI(row)
         return None
+
+    def get_all_vdis(self):
+        res = self._conn.execute("SELECT * FROM VDI INNER JOIN vhd ON vdi.vhd_id = vhd.id")
+        vdis = []
+        for row in res:
+            vdis.append(VDI(row))
+        return vdis
 
     @contextmanager
     def write_context(self):
