@@ -44,9 +44,25 @@ def snapshot(dbg, vol_path, snap_path):
 
 def get_parent(dbg, vol_path):
     cmd = ["/usr/bin/vhd-util", "query", "-n", vol_path, "-p"]
-    return call(dbg, cmd)
+    return call(dbg, cmd).rstrip()
+
+def get_vsize(dbg, vol_path):
+    # vsize is returned in MB but we want to return bytes
+    cmd = ["/usr/bin/vhd-util", "query", "-n", vol_path, "-v"]
+    out = call(dbg, cmd).rstrip()
+    return int(out) * 1024 * 1024
+
+def get_psize(dbg, vol_path):
+    cmd = ["/usr/bin/vhd-util", "query", "-n", vol_path, "-s"]
+    return call(dbg, cmd).rstrip()
 
 def set_parent(dbg, vol_path, parent_path):
     cmd = ["/usr/bin/vhd-util", "modify",
            "-n", vol_path, "-p", parent_path]
     return call(dbg, cmd)
+
+def is_parent_pointing_to_path(dbg, vol_path, parent_path):
+    stdout = get_parent(dbg, vol_path)
+    path = stdout.rstrip()
+    log.debug("is_parent_pointing_to_path %s %s" % (parent_path, path))
+    return parent_path[-12:] == path[-12:]

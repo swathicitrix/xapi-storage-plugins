@@ -40,14 +40,14 @@ def create(dbg, sr, name, description, size, cb):
 
     db = VhdMetabase.VhdMetabase(meta_path)
     with db.write_context():
-        vhd_id = db.insert_new_vhd(vsize)
-        db.insert_vdi(name, description, vdi_uuid, vhd_id)
-        vhd_path = cb.volumeCreate(opq, str(vhd_id), vsize)
-        vhdutil.create(vhd_path, size_mib)
+        vhd = db.insert_new_vhd(vsize)
+        db.insert_vdi(name, description, vdi_uuid, vhd.id)
+        vhd_path = cb.volumeCreate(opq, str(vhd.id), vsize)
+        vhdutil.create(dbg, vhd_path, size_mib)
     db.close()
 
-    psize = cb.volumeGetPhysSize(opq, vhd_id)
-    vdi_uri = cb.getVolumeUriPrefix(opq) + vol_uuid
+    psize = cb.volumeGetPhysSize(opq, str(vhd.id))
+    vdi_uri = cb.getVolumeUriPrefix(opq) + vdi_uuid
     cb.volumeStopOperations(opq)
 
     return {
@@ -59,8 +59,8 @@ def create(dbg, sr, name, description, size, cb):
         "virtual_size": vsize,
         "physical_utilisation": psize,
         "uri": [DP_URI_PREFIX + vdi_uri],
-        "keys": {},
-    }
+        "keys": {}
+        }
 
 def destroy(dbg, sr, key, cb):
     opq = cb.volumeStartOperations(sr, 'w')
@@ -96,47 +96,52 @@ def resize(dbg, sr, key, new_size, cb):
 
     cb.volumeStopOperations(opq)
 
+def refresh_datapath(dbg, vdi, vol_path, new_vol_path):
+    if vdi.active_on:
+        xapi.storage.libs.poolhelper.refresh_datapath_on_host(dbg, vdi.active_on, vol_path, new_vol_path)
+
 def clone(dbg, sr, key, cb):
     snap_uuid = str(uuid.uuid4())
+    need_extra_snap = False
 
     opq = cb.volumeStartOperations(sr, 'w')
     meta_path = cb.volumeMetadataGetPath(opq)
-    vol_path = cb.volumeGetPath(opq, vdi.vhd.id)
 
     db = VhdMetabase.VhdMetabase(meta_path)
     with Lock(opq, "gl", cb):
         with db.write_context():
             vdi = db.get_vdi_by_id(key)
-
+            vol_path = cb.volumeGetPath(opq, str(vdi.vhd.id))
             snap_vhd = db.insert_child_vhd(vdi.vhd.parent_id, vdi.vhd.vsize)
-            snap_path = cb.volumeCreate(opq, snap_vhd.id, vdi.vhd.vsize)
+            snap_path = cb.volumeCreate(opq, str(snap_vhd.id), vdi.vhd.vsize)
             vhdutil.snapshot(dbg, vol_path, snap_path)
 
-            if snap_vhd.is_child_of(vdi.vhd):
+            # NB. As an optimisation, "vhd-util snapshot A->B" will check if
+            #     "A" is empty. If it is, it will set "B.parent" to "A.parent"
+            #     instead of "A" (provided "A" has a parent) and we are done.
+            #     If "B.parent" still points to "A", we need to rebase "A".
+
+            if vhdutil.is_parent_pointing_to_path(dbg, snap_path, vol_path):
                 need_extra_snap = True
                 db.update_vhd_parent(snap_vhd.id, vdi.vhd.id)
                 db.update_vdi_vhd_id(vdi.uuid, snap_vhd.id)
             else:
-                db.insert_vdi(vdi.name, vdi.desc, snap_uuid, snap_vhd.id)
+                db.insert_vdi(vdi.name, vdi.description, snap_uuid, snap_vhd.id)
 
         if need_extra_snap:
-            reload_on_hosts(dbg, vdi, vol_path, snap_path)
-
+            refresh_datapath(dbg, vdi, vol_path, snap_path)
             with db.write_context():
-                db.update_vhd_psize(vdi.vhd.id, cb.volumeGetPhysSize(opq, vdi.vhd.id))
-
+                db.update_vhd_psize(vdi.vhd.id, cb.volumeGetPhysSize(opq, str(vdi.vhd.id)))
                 snap_2_vhd = db.insert_child_vhd(vdi.vhd.id, vdi.vhd.vsize)
-                snap_2_path = cb.volumeCreate(opq, snap_2_vhd.id, vdi.vhd.vsize)
+                snap_2_path = cb.volumeCreate(opq, str(snap_2_vhd.id), vdi.vhd.vsize)
                 vhdutil.snapshot(dbg, vol_path, snap_2_path)
-
-                db.insert_vdi(vdi.name, vdi.desc, snap_uuid, snap_2_vhd.id)
-
+                db.insert_vdi(vdi.name, vdi.description, snap_uuid, snap_2_vhd.id)
     db.close()
 
     if need_extra_snap:
-        psize = cb.volumeGetPhysSize(opq, snap_2_vhd.id)
+        psize = cb.volumeGetPhysSize(opq, str(snap_2_vhd.id))
     else:
-        psize = cb.volumeGetPhysSize(opq, snap_vhd.id)
+        psize = cb.volumeGetPhysSize(opq, str(snap_vhd.id))
 
     snap_uri = cb.getVolumeUriPrefix(opq) + snap_uuid
     cb.volumeStopOperations(opq)
@@ -145,7 +150,7 @@ def clone(dbg, sr, key, cb):
         "uuid": snap_uuid,
         "key": snap_uuid,
         "name": vdi.name,
-        "description": vdi.desc,
+        "description": vdi.description,
         "read_write": True,
         "virtual_size": vdi.vhd.vsize,
         "physical_utilisation": psize,
@@ -153,101 +158,34 @@ def clone(dbg, sr, key, cb):
         "keys": {}
     }
 
-    snap_uuid = str(uuid.uuid4())
-
-
-    key_path = cb.volumeGetPath(opq, key)
-
-    conn = connectSQLite3(meta_path)
-    with Lock(opq, "gl", cb):
-        with write_context(conn):
-            res = conn.execute("select name,parent,description,uuid,vsize from VDI where rowid = (?)",
-                               (int(key),)).fetchall()
-            (p_name, p_parent, p_desc, p_uuid, p_vsize) = res[0]
-
-            res = conn.execute("insert into VDI(snap, parent, name, description, uuid, vsize) values (?, ?, ?, ?, ?, ?)", 
-                               (0, p_parent, p_name, p_desc, snap_uuid, p_vsize))
-            snap_name = str(res.lastrowid)
-            snap_path = cb.volumeCreate(opq, snap_name, int(p_vsize))
-        
-            # Snapshot from key
-            vhdutil.snapshot(dbg, key_path, snap_path)
-    
-            # NB. As an optimisation, "vhd-util snapshot A->B" will check if
-            #     "A" is empty. If it is, it will set "B.parent" to "A.parent"
-            #     instead of "A" (provided "A" has a parent) and we are done.
-            #     If "B.parent" still points to "A", we need to rebase "A".
-    
-            # Fetch the parent of the newly created snapshot
-            stdout = vhdutil.get_parent(dbg, snap_path)
-            parent_key = os.path.basename(stdout.rstrip())
-
-            if parent_key[-12:] == key[-12:]:
-                log.debug("%s: Volume.snapshot: parent_key == key" % (dbg))
-            
-                res = conn.execute("select active_on from VDI where key = ?", (int(key),)).fetchall()
-                active_on = res[0][0]
-                if active_on: 
-                    xapi.storage.libs.poolhelper.suspend_datapath_on_host(dbg, active_on, key_path)
-                res = conn.execute("insert into VDI(snap, parent) values (?, ?)",
-                                   (0, p_parent))
-                base_name = str(res.lastrowid)
-                base_path = cb.volumeRename(opq, key, base_name)
-                cb.volumeCreate(opq, key, int(p_vsize))
-
-                vhdutil.snapshot(dbg, key_path, base_path)
-
-                # Finally, update the snapshot parent to the rebased volume
-                vhdutil.set_parent(dbg, snap_path, base_path)
-
-                res = conn.execute("update VDI set parent = (?) where rowid = (?)",
-                                   (int(base_name), int(snap_name),) )
-                res = conn.execute("update VDI set parent = (?) where rowid = (?)",
-                                   (int(base_name), int(key),) )
-        
-                if active_on: 
-                    xapi.storage.libs.poolhelper.resume_datapath_on_host(dbg, active_on, key_path)
-
-    conn.close()
-    psize = cb.volumeGetPhysSize(opq, snap_name)
-    snap_uri = cb.getVolumeURI(opq, snap_name)
-    cb.volumeStopOperations(opq)
-
-    return {
-        "uuid": snap_uuid,
-        "key": snap_name,
-        "name": p_name,
-        "description": p_desc,
-        "read_write": True,
-        "virtual_size": p_vsize,
-        "physical_utilisation": psize,
-        "uri": [DP_URI_PREFIX + snap_uri],
-        "keys": {}
-    }
 
 def stat(dbg, sr, key, cb):
     opq = cb.volumeStartOperations(sr, 'r')
     meta_path = cb.volumeMetadataGetPath(opq)
 
-    conn = connectSQLite3(meta_path)
-    res = conn.execute("select name,description,uuid,vsize from VDI where rowid = (?)", 
-                       (int(key),)).fetchall()
-    conn.close()
+    db = VhdMetabase.VhdMetabase(meta_path)
+    with db.write_context():
+        vdi = db.get_vdi_by_id(key)
+        vsize = vdi.vhd.vsize
+        if not vsize:
+            # vsize can be None if we crashed during a Volume.resize
+            vsize = vhdutil.get_vsize(dbg, cb.volumeGetPath(opq, str(vdi.vhd.id)))
+            db.update_vhd_vsize(vdi.vhd.id, vsize)
+    db.close()
 
-    (name,desc,uuid,vsize) = res[0]
-    psize = cb.volumeGetPhysSize(opq, key)
-    key_uri = cb.getVolumeURI(opq, key)
+    psize = cb.volumeGetPhysSize(opq, str(vdi.vhd.id))
+    vdi_uri = cb.getVolumeUriPrefix(opq) + vdi.uuid
     cb.volumeStopOperations(opq)
 
     return {
-        "uuid": uuid,
-        "key": key,
-        "name": name,
-        "description": desc,
+        "uuid": vdi.uuid,
+        "key": vdi.uuid,
+        "name": vdi.name,
+        "description": vdi.description,
         "read_write": True,
         "virtual_size": vsize,
         "physical_utilisation": psize,
-        "uri": [DP_URI_PREFIX + key_uri],
+        "uri": [DP_URI_PREFIX + vdi_uri],
         "keys": {}
     }
 
@@ -256,27 +194,32 @@ def ls(dbg, sr, cb):
     opq = cb.volumeStartOperations(sr, 'r')
     meta_path = cb.volumeMetadataGetPath(opq)
 
-    conn = connectSQLite3(meta_path)
-    res = conn.execute("select key,name,description,uuid,vsize from VDI where uuid not NULL").fetchall()
-    conn.close()
-    
-    for (key_int,name,desc,uuid,vsize) in res:
-        key = str(key_int)
-        psize = cb.volumeGetPhysSize(opq, key)
-        vol_path = cb.volumeGetPath(opq, key)
-        vol_uri = cb.getVolumeURI(opq, key)
+    db = VhdMetabase.VhdMetabase(meta_path)
+    with db.write_context():
+        vdis = db.get_all_vdis()
+
+    for vdi in vdis:
+        vsize = vdi.vhd.vsize
+        if not vsize:
+            # vsize can be None if we crashed during a Volume.resize
+            with db.write_context():
+                vsize = vhdutil.get_vsize(dbg, cb.volumeGetPath(opq, str(vdi.vhd.id)))
+                db.update_vhd_vsize(vdi.vhd.id, vsize)
+        psize = cb.volumeGetPhysSize(opq, str(vdi.vhd.id))
+        vdi_uri = cb.getVolumeUriPrefix(opq) + vdi.uuid
         results.append({
-                "uuid": uuid,
-                "key": key,
-                "name": name,
-                "description": desc,
+                "uuid": vdi.uuid,
+                "key": vdi.uuid,
+                "name": vdi.name,
+                "description": vdi.description,
                 "read_write": True,
                 "virtual_size": vsize,
                 "physical_utilisation": psize,
-                "uri": [DP_URI_PREFIX + vol_uri],
+                "uri": [DP_URI_PREFIX + vdi_uri],
                 "keys": {}
         })
 
+    db.close()
     cb.volumeStopOperations(opq)
     return results
 
@@ -296,14 +239,15 @@ def set_property(dbg, sr, key, field, value, cb):
     opq = cb.volumeStartOperations(sr, 'w')
     meta_path = cb.volumeMetadataGetPath(opq)
     
-    conn = connectSQLite3(meta_path)
-    with write_context(conn):
-        # Danger, danger. Where does field come from? SQL Injection risk!
-        query = ("update VDI set %s = (?) where rowid = (?)" % field)
-        res = conn.execute(query, (value, int(key),) )
-    conn.close()
+    db = VhdMetabase.VhdMetabase(meta_path)
+    with db.write_context():
+        vdi = db.get_vdi_by_id(key)        
+        if field == "name":
+            db.update_vdi_name(vdi.uuid, value)
+        elif field == "description":
+            db.update_vdi_description(vdi.uuid, value)
+    db.close()
     cb.volumeStopOperations(opq)
-
 
 
 # here we have all datapath facing functions
@@ -315,10 +259,18 @@ def parse_datapath_uri(uri):
     return ("vhd:///" + mount_or_vg, name)     
 
 def attach(dbg, uri, domain, cb):
-    sr,name = parse_datapath_uri(uri)
+    sr,key = parse_datapath_uri(uri)
     opq = cb.volumeStartOperations(sr, 'r')
+
+    meta_path = cb.volumeMetadataGetPath(opq)
+    db = VhdMetabase.VhdMetabase(meta_path)
+    with db.write_context():
+        vdi = db.get_vdi_by_id(key)
     # activate LVs chain here
-    vol_path = cb.volumeGetPath(opq, name)
+    db.close()
+
+    vol_path = cb.volumeGetPath(opq, str(vdi.vhd.id))
+    cb.volumeStopOperations(opq)
     tap = tapdisk.create(dbg)
     tapdisk.save_tapdisk_metadata(dbg, vol_path, tap)
     return {
@@ -328,93 +280,83 @@ def attach(dbg, uri, domain, cb):
 
 def activate(dbg, uri, domain, cb):
     this_host_label = util.get_current_host()
-
-    sr,name = parse_datapath_uri(uri)
+    sr,key = parse_datapath_uri(uri)
     opq = cb.volumeStartOperations(sr, 'w')
-    vol_path = cb.volumeGetPath(opq, name)
     meta_path = cb.volumeMetadataGetPath(opq)
+    db = VhdMetabase.VhdMetabase(meta_path)
 
     with Lock(opq, "gl", cb):
-        conn = connectSQLite3(meta_path)
-        with write_context(conn):
-            res = conn.execute("update VDI set active_on = (?) where rowid = (?)",
-                               (this_host_label, int(name),) )
-
+        with db.write_context():
+            vdi = db.get_vdi_by_id(key)
+            db.update_vdi_active_on(vdi.uuid, this_host_label)
+            vol_path = cb.volumeGetPath(opq, str(vdi.vhd.id))
             img = image.Vhd(vol_path)
             tap = tapdisk.load_tapdisk_metadata(dbg, vol_path)
             tap.open(dbg, img)
             tapdisk.save_tapdisk_metadata(dbg, vol_path, tap)
-
-        conn.close()
+    db.close()
+    cb.volumeStopOperations(opq)
     
 def deactivate(dbg, uri, domain, cb):
-    sr,name = parse_datapath_uri(uri)
+    sr,key = parse_datapath_uri(uri)
     opq = cb.volumeStartOperations(sr, 'w')
-    vol_path = cb.volumeGetPath(opq, name)
     meta_path = cb.volumeMetadataGetPath(opq)
+    db = VhdMetabase.VhdMetabase(meta_path)
 
-    conn = connectSQLite3(meta_path)
     with Lock(opq, "gl", cb):
-        with write_context(conn):
-            res = conn.execute("update VDI set active_on = (?) where rowid = (?)",
-                               (None, int(name),) )
-
+        with db.write_context():
+            vdi = db.get_vdi_by_id(key)
+            db.update_vdi_active_on(vdi.uuid, None)
+            vol_path = cb.volumeGetPath(opq, str(vdi.vhd.id))
             tap = tapdisk.load_tapdisk_metadata(dbg, vol_path)
             tap.close(dbg)
 
-        conn.close()
+    db.close()
+    cb.volumeStopOperations(opq)
 
 def detach(dbg, uri, domain, cb):
-    sr,name = parse_datapath_uri(uri)
+    sr,key = parse_datapath_uri(uri)
     opq = cb.volumeStartOperations(sr, 'r')
+
+    meta_path = cb.volumeMetadataGetPath(opq)
+    db = VhdMetabase.VhdMetabase(meta_path)
+    with db.write_context():
+        vdi = db.get_vdi_by_id(key)
     # deactivate LVs chain here
-    vol_path = cb.volumeGetPath(opq, name)
+    db.close()
+
+    vol_path = cb.volumeGetPath(opq, str(vdi.vhd.id))
+    cb.volumeStopOperations(opq)
     tap = tapdisk.load_tapdisk_metadata(dbg, vol_path)
     tap.destroy(dbg)
     tapdisk.forget_tapdisk_metadata(dbg, vol_path)
 
-def db_check_vdi_is_nonpersistent(dbg, conn, name):
-    log.debug("%s: libvhd.db_check_vdi_is_nonpersistent: name == %s" %
-              (dbg, name))
-
-    res = conn.execute("select nonpersistent from VDI where rowid=:row",
-                       {"row" : int(name)}).fetchall()
-    return res[0][0] == 1
-
-def set_vdi_non_persistent(conn, name):
-    conn.execute("update VDI set nonpersistent=1 where rowid=:row",
-                 {"row" : int(name)})
-
-def clear_vdi_non_persistent(conn, name):
-    conn.execute("update VDI set nonpersistent=NULL where rowid=:row",
-                 {"row" : int(name)})
-
-def create_single_clone(conn, sr, name, cb):
+def create_single_clone(conn, sr, key, cb):
     pass
 
 def epcopen(dbg, uri, persistent, cb):
     log.debug("%s: Datapath.epcopen: uri == %s" % (dbg, uri))
 
-    sr, name = parse_datapath_uri(uri)
+    sr, key = parse_datapath_uri(uri)
     opq = cb.volumeStartOperations(sr, 'w')
 
-    vol_path = cb.volumeGetPath(opq, name)
-    meta_path = cb.volumeMetadataGetPath(opq)
-    
-    conn = connectSQLite3(meta_path)
+    meta_path = cb.volumeMetadataGetPath(opq)    
+    db = VhdMetabase.VhdMetabase(meta_path)
 
     try:
         with Lock(opq, "gl", cb):
             try:
-                with write_context(conn):
+                with db.write_context():
+                    vdi = db.get_vdi_by_id(key)
+                    vol_path = cb.volumeGetPath(opq, str(vdi.vhd.id))
                     if (persistent):
                         log.debug("%s: Datapath.epcopen: %s is persistent "
                                   % (dbg, vol_path))
-                        if (db_check_vdi_is_nonpersistent(dbg, conn, name)):
+                        if vdi.nonpersistent:
                             # Truncate, etc
                             vhdutil.reset(dbg, vol_path)
-                            clear_vdi_non_persistent(conn, name)
-                    elif (db_check_vdi_is_nonpersistent(dbg, conn, name)):
+                            db.update_vdi_nonpersistent(vdi.uuid, 1)
+                    elif vdi.nonpersistent:
                         log.debug(
                             "%s: Datapath.epcopen: %s already marked non-persistent"
                             % (dbg, vol_path))
@@ -423,49 +365,44 @@ def epcopen(dbg, uri, persistent, cb):
                     else:
                         log.debug("%s: Datapath.epcopen: %s is non-persistent"
                                   % (dbg, vol_path))
-                        set_vdi_non_persistent(conn, name)
+                        db.update_vdi_nonpersistent(vdi.uuid, 1)
                         if (not vhdutil.is_empty(dbg, vol_path)):
                             # Create single clone
-                            create_single_clone(conn, sr, name, cb)
+                            create_single_clone(conn, sr, key, cb)
             except:
                 log.error("%s: Datapath.epcopen: failed to complete open, %s"
                           % (dbg, sys.exc_info()[0]))
                 raise
     finally:
-        conn.close()
+        db.close()
 
     return None
 
 def epcclose(dbg, uri, cb):
     log.debug("%s: Datapath.epcclose: uri == %s" % (dbg, uri))
-    sr, name = parse_datapath_uri(uri)
+    sr, key = parse_datapath_uri(uri)
     opq = cb.volumeStartOperations(sr, 'w')
 
-    vol_path = cb.volumeGetPath(opq, name)
     meta_path = cb.volumeMetadataGetPath(opq)
+    db = VhdMetabase.VhdMetabase(meta_path)
     
-    conn = connectSQLite3(meta_path)
-
     try:
         with Lock(opq, "gl", cb):
-            with write_context(conn):
-                if (db_check_vdi_is_nonpersistent(dbg, conn, name)):
+            with db.write_context():
+                vdi = db.get_vdi_by_id(key)
+                vol_path = cb.volumeGetPath(opq, str(vdi.vhd.id))
+                if vdi.nonpersistent:
                     # truncate
                     vhdutil.reset(dbg, vol_path)
-                    clear_vdi_non_persistent(conn, name)
+                    db.update_vdi_nonpersistent(vdi.uuid, None)
     except:
         log.error("%s: Datapath.epcclose: failed to complete close, %s"
                   % (dbg, sys.exc_info()[0]))
         raise
     finally:
-        conn.close()
+        db.close()
 
     return None
-
-def connectSQLite3(db):
-    conn = sqlite3.connect(db, timeout=3600, isolation_level="DEFERRED")
-    conn.row_factory = sqlite3.Row
-    return conn
 
 def startGC(dbg, sr_name, uri):
     return

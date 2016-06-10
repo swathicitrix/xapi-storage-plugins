@@ -72,9 +72,11 @@ class Tapdisk:
               "-p",
               str(self.pid)])
 
-    def unpause(self, dbg):
+    def unpause(self, dbg, f=None):
         cmd = ["tap-ctl", "unpause", "-m",
                str(self.minor), "-p", str(self.pid)]
+        if f:
+            cmd = cmd + ["-a", str(f)]
         if self.secondary is not None:
             cmd = cmd + ["-2 ", self.secondary]
         call(dbg, cmd)

@@ -69,7 +69,7 @@ def dlm_fence_daemon(node_id):
             bd = "/dev/" + key + "/sbd"
             ret = block_read(bd, BLK_SIZE * 2 * n)
             if ret == MSG_OK:
-                log.debug("dlm_fence_daemon: MSG_OK")
+                pass
             elif ret == MSG_FENCE:
                 log.debug("dlm_fence_daemon: MSG_FENCE")
                 log.debug("dlm_fence_daemon: Settingo WD timeout to 1 second")

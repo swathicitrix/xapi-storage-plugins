@@ -8,7 +8,7 @@ class VDI(object):
         self.uuid = row['uuid']
         self.name = row['name']
         self.description = row['description']
-        self.activeon = row['active_on']
+        self.active_on = row['active_on']
         self.nonpersistent = row['nonpersistent']
         self.vhd = VHD.from_row(row)
 
@@ -45,7 +45,7 @@ class VhdMetabase(object):
         self.__connect()
 
     def __connect(self):
-        self._conn = sqlite3.connect(self.__path)
+        self._conn = sqlite3.connect(self.__path, timeout=3600, isolation_level="DEFERRED")
         self._conn.row_factory = sqlite3.Row
 
     def create(self):

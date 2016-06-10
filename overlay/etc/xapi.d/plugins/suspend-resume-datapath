@@ -38,8 +38,29 @@ def resume_datapath(session, args):
     log.debug("%s: resume_datapath returning True" % (dbg))
     return "True"
 
+def refresh_datapath(session, args):
+    # ToDo: add debug context
+    dbg = None
+    log.debug("%s: in refresh_datapath (args = %s)" % (dbg, args))
+    loop = losetup.find(dbg, args['path'])
+    if loop:
+        dm = dmsetup.find(dbg, loop.block_device())
+        dm.suspend(dbg)
+        dm.resume(dbg)
+    log.debug("%s: looking for tapdisks using filename %s" % (dbg, args['path']))
+    tap = tapdisk.find_by_file(dbg, image.Path(args['path']))
+    if tap:
+        log.debug("%s: found a tapdisk to refresh: %s" % (dbg, tap))
+        tap.pause(dbg)
+        tap.unpause(dbg, image.Vhd(args['new_path']))
+        tapdisk.save_tapdisk_metadata(dbg, args['new_path'], tap)
+        tapdisk.forget_tapdisk_metadata(dbg, args['path'])
+    log.debug("%s: refresh_datapath returning True" % (dbg))
+    return "True"
+    
 
 if __name__ == "__main__":
     XenAPIPlugin.dispatch({
         'suspend_datapath': suspend_datapath,
-        'resume_datapath': resume_datapath})
+        'resume_datapath': resume_datapath,
+        'refresh_datapath': refresh_datapath})

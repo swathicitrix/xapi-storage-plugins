@@ -90,3 +90,8 @@ def suspend_datapath_on_host(dbg, host, path):
 
 def resume_datapath_on_host(dbg, host, path):
     call_plugin_on_host(dbg, host, "suspend-resume-datapath", "resume_datapath", {'path': path})
+
+
+def refresh_datapath_on_host(dbg, host, path, new_path):
+    call_plugin_on_host(dbg, host, "suspend-resume-datapath", "refresh_datapath", 
+                        {'path': path, 'new_path': new_path})
