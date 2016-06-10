@@ -60,3 +60,48 @@ class VhdMetabaseTest(unittest.TestCase):
         vdis = self.subject.get_all_vdis()
 
         self.assertEquals(2, len(vdis))
+
+    def test_update_vhd_psize_success(self):
+        self.subject.populate_test_set_1()
+        vhd = self.subject.get_vhd_by_id(1)
+        psize = vhd.psize
+
+        self.subject.update_vhd_psize(1, 25*1024)
+        vhd = self.subject.get_vhd_by_id(1)
+
+        self.assertEquals(25*1024, vhd.psize)
+
+    def test_update_vhd_vsize_success(self):
+        self.subject.populate_test_set_1()
+        vhd = self.subject.get_vhd_by_id(1)
+        psize = vhd.psize
+
+        self.subject.update_vhd_vsize(1, 25*1024)
+        vhd = self.subject.get_vhd_by_id(1)
+
+        self.assertEquals(25*1024, vhd.vsize)
+
+    def test_update_vdi_name_success(self):
+        self.subject.populate_test_set_1()
+        self.subject.update_vdi_name(1, "FirstRenamedVDI");
+        
+        vdi = self.subject.get_vdi_by_id(1)
+
+        self.assertEquals("FirstRenamedVDI", vdi.name)
+
+    def test_update_vdi_description_success(self):
+        self.subject.populate_test_set_1()
+        self.subject.update_vdi_description(1, "First Renamed VDI");
+        
+        vdi = self.subject.get_vdi_by_id(1)
+
+        self.assertEquals("First Renamed VDI", vdi.description)
+
+    def test_update_vdi_vhd_id_success(self):
+        self.subject.populate_test_set_1()
+        self.subject.insert_child_vhd(3, 20*1024)
+        self.subject.update_vdi_vhd_id(2, 4);
+        
+        vdi = self.subject.get_vdi_by_id(2)
+
+        self.assertEquals(4, vdi.vhd.id)

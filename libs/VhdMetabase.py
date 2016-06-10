@@ -65,22 +65,17 @@ class VhdMetabase(object):
              "vhd_id": vhd_id})
 
     def update_vdi_vhd_id(self, uuid, vhd_id):
-        res = self._conn.execute(
-            "UPDATE vdi SET vhd_id"
-            " values (:vhd_id) WHERE uuid = :uuid",
-            {"vhd_id": vhd_id, "uuid": uuid})
+        self.__update_vdi(uuid, "vhd_id", vhd_id)
 
     def update_vdi_name(self, uuid, name):
-        res = self._conn.execute(
-            "UPDATE vdi SET name"
-            " values (:name) WHERE uuid = :uuid",
-            {"name": name, "uuid": uuid})
+        self.__update_vdi(uuid, "name", name)
 
     def update_vdi_description(self, uuid, description):
-        res = self._conn.execute(
-            "UPDATE vdi SET description"
-            " values (:description) WHERE uuid = :uuid",
-            {"description": description, "uuid": uuid})
+        self.__update_vdi(uuid, "description", description)
+
+    def __update_vdi(self, uuid, key, value):
+        query = "UPDATE vdi SET %s=:%s WHERE uuid=:uuid" % (key, key)
+        res = self._conn.execute(query, {key: value, "uuid": uuid})
 
     def insert_new_vhd(self, vsize):
         return self.__insert_vhd(None, None, vsize, None)
@@ -98,8 +93,8 @@ class VhdMetabase(object):
         self.__update_vhd(vhd_id, "psize", psize)
 
     def __update_vhd(self, vhd_id, key, value):
-        query = "UPDATE vhd SET %s VALUES (?)" % key
-        res = self._conn.execute(query, (key))
+        query = "UPDATE vhd SET %s=:%s WHERE id=:vhd_id" % (key, key)
+        res = self._conn.execute(query, {key: value, "vhd_id": vhd_id})
 
     def __insert_vhd(self, parent, snap, vsize, psize):
         res = self._conn.execute(
@@ -128,6 +123,14 @@ class VhdMetabase(object):
         for row in res:
             vdis.append(VDI(row))
         return vdis
+
+    def get_vhd_by_id(self, vhd_id):
+        res = self._conn.execute("SELECT * from VHD where id=:id",
+                                 {"id": vhd_id})
+        row = res.fetchone()
+        if (row):
+            return VHD.fromrow(row)
+        return None
 
     @contextmanager
     def write_context(self):
