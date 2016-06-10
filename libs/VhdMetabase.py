@@ -10,7 +10,7 @@ class VDI(object):
         self.description = row['description']
         self.activeon = row['active_on']
         self.nonpersistent = row['nonpersistent']
-        self.vhd = VHD.fromrow(row)
+        self.vhd = VHD.from_row(row)
 
 class VHD(object):
     def __init__(self, vhd_id, parent, snap, vsize, psize, gc_status = None):
@@ -28,13 +28,15 @@ class VHD(object):
         return False
 
     @classmethod
-    def fromrow(cls, row):
-        return cls(row['id'],
-                   row['parent_id'],
-                   row['snap'],
-                   row['vsize'],
-                   row['psize'],
-                   row['gc_status'])
+    def from_row(cls, row):
+        return cls(
+            row['id'],
+            row['parent_id'],
+            row['snap'],
+            row['vsize'],
+            row['psize'],
+            row['gc_status']
+        )
 
 class VhdMetabase(object):
 
@@ -48,25 +50,40 @@ class VhdMetabase(object):
 
     def create(self):
         with self._conn:
+            self._conn.execute("""
+                CREATE TABLE vhd(
+                    id        INTEGER PRIMARY KEY NOT NULL,
+                    snap      INTEGER,
+                    parent_id INTEGER,
+                    vsize     INTEGER,
+                    psize     INTEGER,
+                    gc_status TEXT
+                )"""
+            )
             self._conn.execute(
-                "CREATE TABLE vhd(id INTEGER PRIMARY KEY, snap INTEGER, "
-                "parent_id INTEGER, vsize INTEGER, psize INTEGER, "
-                "gc_status TEXT)")
-            self._conn.execute("CREATE INDEX vhd_parent ON vhd(parent_id)")
-            self._conn.execute(
-                "CREATE TABLE vdi(uuid text PRIMARY KEY, name TEXT, "
-                "description TEXT, active_on TEXT, nonpersistent INTEGER, "
-                "vhd_id NOT NULL UNIQUE, "
-                "FOREIGN KEY(vhd_id) REFERENCES vhd(key))")
+                "CREATE INDEX vhd_parent ON vhd(parent_id)"
+            )
+            self._conn.execute("""
+                CREATE TABLE vdi(
+                    uuid          TEXT             PRIMARY KEY,
+                    name          TEXT,
+                    description   TEXT,
+                    active_on     TEXT,
+                    nonpersistent INTEGER,
+                    vhd_id        INTEGER NOT NULL UNIQUE,
+                    FOREIGN KEY(vhd_id) REFERENCES vhd(id)
+                )"""
+            )
 
     def insert_vdi(self, name, description, uuid, vhd_id):
-        res = self._conn.execute(
-            "INSERT INTO vdi(uuid, name, description, vhd_id)"
-            " values (:uuid, :name, :description, :vhd_id)",
+        res = self._conn.execute("""
+            INSERT INTO vdi(uuid, name, description, vhd_id)
+            VALUES (:uuid, :name, :description, :vhd_id)""",
             {"uuid": uuid,
              "name": name,
              "description": description,
-             "vhd_id": vhd_id})
+             "vhd_id": vhd_id}
+        )
 
     def delete_vdi(self, uuid):
         self._conn.execute(
@@ -89,8 +106,13 @@ class VhdMetabase(object):
         self.__update_vdi(uuid, "nonpersistent", nonpersistent)
 
     def __update_vdi(self, uuid, key, value):
-        query = "UPDATE vdi SET %s=:%s WHERE uuid=:uuid" % (key, key)
-        res = self._conn.execute(query, {key: value, "uuid": uuid})
+        res = self._conn.execute("""
+            UPDATE vdi
+               SET {} = :{}
+             WHERE uuid = :uuid""".format(key, key),
+            {key: value,
+            "uuid": uuid}
+        )
 
     def insert_new_vhd(self, vsize):
         return self.__insert_vhd(None, None, vsize, None)
@@ -112,8 +134,13 @@ class VhdMetabase(object):
         self.__update_vhd(vhd_id, "psize", psize)
 
     def __update_vhd(self, vhd_id, key, value):
-        query = "UPDATE vhd SET %s=:%s WHERE id=:vhd_id" % (key, key)
-        res = self._conn.execute(query, {key: value, "vhd_id": vhd_id})
+        res = self._conn.execute("""
+            UPDATE vhd
+               SET {} = :{}
+             WHERE id = :vhd_id""".format(key, key),
+            {key: value,
+            "vhd_id": vhd_id}
+        )
 
     def __insert_vhd(self, parent, snap, vsize, psize):
         res = self._conn.execute(
@@ -122,25 +149,40 @@ class VhdMetabase(object):
             {"parent": parent,
              "snap": snap,
              "vsize": vsize,
-             "psize": psize})
+             "psize": psize}
+        )
+
         return VHD(res.lastrowid, parent, snap, vsize, psize)
 
     def get_vdi_by_id(self, vdi_uuid):
-        res = self._conn.execute(
-            "SELECT * FROM vdi INNER JOIN vhd ON vdi.vhd_id = vhd.id "
-            "WHERE uuid=:uuid",
-            {"uuid" : vdi_uuid})
+        res = self._conn.execute("""
+            SELECT *
+              FROM vdi
+                   INNER JOIN vhd
+                   ON vdi.vhd_id = vhd.id
+             WHERE uuid = :uuid""",
+            {"uuid" : vdi_uuid}
+        )
+
         row = res.fetchone()
         if (row):
             return VDI(row)
+
         return None
 
     def get_all_vdis(self):
-        res = self._conn.execute(
-            "SELECT * FROM VDI INNER JOIN vhd ON vdi.vhd_id = vhd.id")
+        # name, description, active_on, nonpersistent, vhd_id, vsize
+        res = self._conn.execute("""
+            SELECT *
+              FROM vdi
+                   INNER JOIN vhd
+                   ON vdi.vhd_id = vhd.id"""
+        )
+
         vdis = []
         for row in res:
             vdis.append(VDI(row))
+
         return vdis
 
     def get_children(self, vhd_id):
@@ -152,11 +194,17 @@ class VhdMetabase(object):
         return vhds
 
     def get_vhd_by_id(self, vhd_id):
-        res = self._conn.execute("SELECT * from VHD where id=:id",
-                                 {"id": vhd_id})
+        res = self._conn.execute("""
+            SELECT *
+              FROM vhd
+             WHERE id = :id""",
+            {"id": vhd_id}
+        )
+
         row = res.fetchone()
         if (row):
-            return VHD.fromrow(row)
+            return VHD.from_row(row)
+
         return None
 
     @contextmanager
