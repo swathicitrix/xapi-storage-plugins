@@ -18,12 +18,12 @@ class StubVhdMetabase(VhdMetabase.VhdMetabase):
         TBD: Describe the data set
         """
         with self.write_context():
-            id = self.insert_new_vhd(10*1024)
-            self.insert_vdi("VDI1", "First VDI", str(1), id)
+            vhd = self.insert_new_vhd(10*1024)
+            self.insert_vdi("VDI1", "First VDI", str(1), vhd.id)
 
-            parent_id = self.insert_new_vhd(20*1024)
-            id = self.insert_child_vhd(parent_id, 20*1024)
-            self.insert_vdi("Child1", "First Child VDI", str(2), id)
+            parent = self.insert_new_vhd(20*1024)
+            vhd = self.insert_child_vhd(parent.id, 20*1024)
+            self.insert_vdi("Child1", "First Child VDI", str(2), vhd.id)
 
 class VhdMetabaseTest(unittest.TestCase):
 
