@@ -26,8 +26,11 @@ class VHD(object):
 
     @classmethod
     def fromrow(cls, row):
-        return cls(row['id'], row['parent_id'], row['snap'], row['vsize'], row['psize'])
-        
+        return cls(row['id'],
+                   row['parent_id'],
+                   row['snap'],
+                   row['vsize'],
+                   row['psize'])
 
 class VhdMetabase(object):
 
@@ -41,12 +44,16 @@ class VhdMetabase(object):
 
     def create(self):
         with self._conn:
-            self._conn.execute("CREATE TABLE vhd(id INTEGER PRIMARY KEY, snap INTEGER, "
-                               "parent_id INTEGER, vsize INTEGER, psize INTEGER, gc_status TEXT)")
+            self._conn.execute(
+                "CREATE TABLE vhd(id INTEGER PRIMARY KEY, snap INTEGER, "
+                "parent_id INTEGER, vsize INTEGER, psize INTEGER, "
+                "gc_status TEXT)")
             self._conn.execute("CREATE INDEX vhd_parent ON vhd(parent_id)")
-            self._conn.execute("CREATE TABLE vdi(uuid text PRIMARY KEY, name TEXT, "
-                               "description TEXT, active_on TEXT, nonpersistent INTEGER, "
-                               "vhd_id NOT NULL UNIQUE, FOREIGN KEY(vhd_id) REFERENCES vhd(key))")
+            self._conn.execute(
+                "CREATE TABLE vdi(uuid text PRIMARY KEY, name TEXT, "
+                "description TEXT, active_on TEXT, nonpersistent INTEGER, "
+                "vhd_id NOT NULL UNIQUE, "
+                "FOREIGN KEY(vhd_id) REFERENCES vhd(key))")
 
     def insert_vdi(self, name, description, uuid, vhd_id):
         res = self._conn.execute(
@@ -105,15 +112,18 @@ class VhdMetabase(object):
         return VHD(res.lastrowid, parent, snap, vsize, psize)
 
     def get_vdi_by_id(self, vdi_uuid):
-        res = self._conn.execute("SELECT * FROM vdi INNER JOIN vhd ON vdi.vhd_id = vhd.id WHERE uuid=:uuid",
-                                 {"uuid" : vdi_uuid})
+        res = self._conn.execute(
+            "SELECT * FROM vdi INNER JOIN vhd ON vdi.vhd_id = vhd.id "
+            "WHERE uuid=:uuid",
+            {"uuid" : vdi_uuid})
         row = res.fetchone()
         if (row):
             return VDI(row)
         return None
 
     def get_all_vdis(self):
-        res = self._conn.execute("SELECT * FROM VDI INNER JOIN vhd ON vdi.vhd_id = vhd.id")
+        res = self._conn.execute(
+            "SELECT * FROM VDI INNER JOIN vhd ON vdi.vhd_id = vhd.id")
         vdis = []
         for row in res:
             vdis.append(VDI(row))
