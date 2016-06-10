@@ -103,6 +103,36 @@ class VhdMetabaseTest(unittest.TestCase):
 
         self.assertEquals("First Renamed VDI", vdi.description)
 
+    def test_update_vdi_activeon_success(self):
+        self.subject.populate_test_set_1()
+        self.subject.update_vdi_active_on(1, "Host1");
+        
+        vdi = self.subject.get_vdi_by_id(1)
+
+        self.assertEquals("Host1", vdi.activeon)
+
+        # And clear it again
+        self.subject.update_vdi_active_on(1, None);
+
+        vdi = self.subject.get_vdi_by_id(1)
+
+        self.assertEquals(None, vdi.activeon)
+
+    def test_update_vdi_nonpersistent_success(self):
+        self.subject.populate_test_set_1()
+        self.subject.update_vdi_nonpersistent(1, 1);
+        
+        vdi = self.subject.get_vdi_by_id(1)
+
+        self.assertEquals(1, vdi.nonpersistent)
+
+        # And clear it again
+        self.subject.update_vdi_nonpersistent(1, None);
+        
+        vdi = self.subject.get_vdi_by_id(1)
+
+        self.assertEquals(None, vdi.nonpersistent)
+
     def test_update_vdi_vhd_id_success(self):
         self.subject.populate_test_set_1()
         self.subject.insert_child_vhd(3, 20*1024)

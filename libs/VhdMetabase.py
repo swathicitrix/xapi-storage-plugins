@@ -8,6 +8,8 @@ class VDI(object):
         self.uuid = row['uuid']
         self.name = row['name']
         self.description = row['description']
+        self.activeon = row['active_on']
+        self.nonpersistent = row['nonpersistent']
         self.vhd = VHD.fromrow(row)
 
 class VHD(object):
@@ -72,6 +74,12 @@ class VhdMetabase(object):
 
     def update_vdi_description(self, uuid, description):
         self.__update_vdi(uuid, "description", description)
+
+    def update_vdi_active_on(self, uuid, active_on):
+        self.__update_vdi(uuid, "active_on", active_on)
+
+    def update_vdi_nonpersistent(self, uuid, nonpersistent):
+        self.__update_vdi(uuid, "nonpersistent", nonpersistent)
 
     def __update_vdi(self, uuid, key, value):
         query = "UPDATE vdi SET %s=:%s WHERE uuid=:uuid" % (key, key)
