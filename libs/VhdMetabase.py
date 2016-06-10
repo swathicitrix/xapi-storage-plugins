@@ -190,7 +190,7 @@ class VhdMetabase(object):
             "SELECT * FROM vhd WHERE parent_id=:parent", {"parent": vhd_id})
         vhds = []
         for row in res:
-            vhds.append(VHD.fromrow(row))
+            vhds.append(VHD.from_row(row))
         return vhds
 
     def get_vhd_by_id(self, vhd_id):
