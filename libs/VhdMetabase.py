@@ -18,6 +18,13 @@ class VHD(object):
         self.vsize = row['vsize']
         self.psize = row['psize']
 
+    def is_child_of(self, vhd_2):
+        # CALL VHD_UTIL
+        if self.parent_id == vhd_2.id:
+            return True
+        return False
+        
+
 class VhdMetabase(object):
 
     def __init__(self, path):
@@ -91,7 +98,7 @@ class VhdMetabase(object):
              "snap": snap,
              "vsize": vsize,
              "psize": psize})
-        return res.lastrowid
+        return VHD(res.lastrowid)
 
     def get_vdi_by_id(self, vdi_uuid):
         res = self._conn.execute("SELECT * FROM vdi INNER JOIN vhd ON vdi.vhd_id = vhd.id WHERE uuid=:uuid",

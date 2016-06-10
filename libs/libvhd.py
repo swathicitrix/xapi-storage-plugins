@@ -107,28 +107,37 @@ def clone(dbg, sr, key, cb):
     with Lock(opq, "gl", cb):
         with db.write_context():
             vdi = db.get_vdi_by_id(key)
-            snap_vhd = db_add_vhd(parent=vdi.vhd.parent_id)
+
+            snap_vhd = db.insert_child_vhd(vdi.vhd.parent_id, vdi.vhd.vsize)
             snap_path = cb.volumeCreate(opq, snap_vhd.id, vdi.vhd.vsize)
             vhdutil.snapshot(dbg, vol_path, snap_path)
-            db_add_vdi(snap_uuid, vdi.name, vdi.desc, snap_vhd.id)
-            parent_path = os.path.basename(vhdutil.get_parent(dbg, snap_path).rstrip())
-            if parent_path[-12:] == vol_path[-12:]:
-                new_leaf_vhd = db_add_vhd(parent=vdi.vhd.id)
-                new_leaf_path = cb.volumeCreate(opq, new_leaf_vhd.id, vdi.vhd.vsize)
-                vhdutil.snapshot(dbg, vol_path, new_leaf_path)
-                db_update_vdi(vhd_id=new_leaf_vhd.id)
-    
-                refresh(vol_path, new_leaf_path)
 
-        db.close()
+            if snap_vhd.is_child_of(vdi.vhd):
+                need_extra_snap = True
+                db.update_vhd_parent(snap_vhd.id, vdi.vhd.id)
+                db.update_vdi_vhd_id(vdi.uuid, snap_vhd.id)
+            else:
+                db.insert_vdi(vdi.name, vdi.desc, snap_uuid, snap_vhd.id)
 
+        if need_extra_snap:
+            reload_on_hosts(dbg, vdi, vol_path, snap_path)
 
+            with db.write_context():
+                db.update_vhd_psize(vdi.vhd.id, cb.volumeGetPhysSize(opq, vdi.vhd.id))
 
-    vdi = db_get_vdi(key)
+                snap_2_vhd = db.insert_child_vhd(vdi.vhd.id, vdi.vhd.vsize)
+                snap_2_path = cb.volumeCreate(opq, snap_2_vhd.id, vdi.vhd.vsize)
+                vhdutil.snapshot(dbg, vol_path, snap_2_path)
 
-    
+                db.insert_vdi(vdi.name, vdi.desc, snap_uuid, snap_2_vhd.id)
 
-    psize = cb.volumeGetPhysSize(opq, snap_vhd.id)
+    db.close()
+
+    if need_extra_snap:
+        psize = cb.volumeGetPhysSize(opq, snap_2_vhd.id)
+    else:
+        psize = cb.volumeGetPhysSize(opq, snap_vhd.id)
+
     snap_uri = cb.getVolumeUriPrefix(opq) + snap_uuid
     cb.volumeStopOperations(opq)
 
