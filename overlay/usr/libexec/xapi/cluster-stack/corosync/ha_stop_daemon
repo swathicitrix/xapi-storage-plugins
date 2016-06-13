@@ -1,0 +1,6 @@
+#!/bin/bash
+
+logger ha_stop_daemon $@
+
+#killall self-fence_daemon.py
+killall acquire_master_lock.py

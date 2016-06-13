@@ -1,0 +1,3 @@
+#!/bin/bash
+
+logger ha_disarm_fencing $@

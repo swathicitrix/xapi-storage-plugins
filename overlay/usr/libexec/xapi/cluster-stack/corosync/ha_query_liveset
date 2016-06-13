@@ -1,0 +1,143 @@
+#!/bin/python
+
+import os
+import subprocess
+import json
+import sys
+import get_ha_sr_mount
+
+def call(cmd_args):
+    p = subprocess.Popen(
+        cmd_args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    stdout, stderr = p.communicate()
+    return stdout.rstrip()
+
+sr_mount = get_ha_sr_mount.get_sr_mount()
+nodeids = os.listdir(sr_mount + "/.ha/host/")
+dlm_output = call(["dlm_tool", "status"])
+dlm_output_lines = dlm_output.splitlines()
+
+liveness = {}
+ismaster = {}
+uuid = {}
+liveset = ""
+
+with open(sr_mount + "/.ha/master/state.json", "r") as fd:
+    meta = json.load(fd)
+    master = meta["master"]
+
+with open("/etc/xensource-inventory", "r") as fd:
+    lines = fd.readlines()
+    for line in lines:
+        if line.startswith("INSTALLATION_UUID="):
+            myhostuuid = line[19:-2]
+
+for nodeid in nodeids:
+    liveness[nodeid] = "FALSE"
+    with open(sr_mount + "/.ha/host/" + nodeid + "/hostuuid", "r") as fd:
+        uuid[nodeid] = fd.readline().rstrip()
+    with open(sr_mount + "/.ha/host/" + nodeid + "/hostname", "r") as fd:
+        if master == fd.readline().rstrip():
+            ismaster[nodeid] = "TRUE"
+        else:
+            ismaster[nodeid] = "FALSE"
+
+for line in dlm_output_lines:
+    if line.startswith("node "):
+        parts = line.split(" ")
+        if parts[2] == 'M':
+            liveness[parts[1]] = "TRUE"
+            liveset += (" " + uuid[parts[1]])
+        elif parts[2] == 'X':
+            liveness[parts[1]] = "FALSE"
+
+out = """<?xml version="1.0" encoding="UTF-8"?>
+<ha_liveset_info version="1.0">
+  <status>Online</status>
+  <localhost>
+    <HostID>%s</HostID>
+  </localhost>""" % myhostuuid
+
+for nodeid in nodeids:
+    out+= """
+  <host>
+    <HostID>%s</HostID>
+    <liveness>%s</liveness>
+    <master>%s</master>
+    <statefile_access>%s</statefile_access>
+    <statefile_corrupted>FALSE</statefile_corrupted>
+    <excluded>FALSE</excluded>
+  </host>""" % (uuid[nodeid], liveness[nodeid], ismaster[nodeid], liveness[nodeid])
+
+out += """
+  <raw_status_on_local_host>
+    <statefile_latency>1</statefile_latency>
+    <statefile_latency_max>1</statefile_latency_max>
+    <statefile_latency_min>0</statefile_latency_min>
+    <heartbeat_latency>7006</heartbeat_latency>
+    <heartbeat_latency_max>7006</heartbeat_latency_max>
+    <heartbeat_latency_min>7006</heartbeat_latency_min>
+    <Xapi_healthcheck_latency>27</Xapi_healthcheck_latency>
+    <Xapi_healthcheck_latency_max>-1</Xapi_healthcheck_latency_max>
+    <Xapi_healthcheck_latency_min>-1</Xapi_healthcheck_latency_min>"""
+
+for nodeid in nodeids:
+    if liveness[nodeid] == "TRUE":
+        out+= """
+    <host_raw_data>
+      <HostID>%s</HostID>
+      <time_since_last_update_on_statefile>7304</time_since_last_update_on_statefile>
+      <time_since_last_heartbeat>3839</time_since_last_heartbeat>
+      <time_since_xapi_restart_first_attempted>-1</time_since_xapi_restart_first_attempted>
+      <xapi_error_string></xapi_error_string>
+      <heartbeat_active_list_on_heartbeat>
+          %s
+      </heartbeat_active_list_on_heartbeat>
+      <heartbeat_active_list_on_statefile>
+          %s
+      </heartbeat_active_list_on_statefile>
+      <statefile_active_list_on_heartbeat>
+          %s
+      </statefile_active_list_on_heartbeat>
+      <statefile_active_list_on_statefile>
+          %s
+      </statefile_active_list_on_statefile>
+    </host_raw_data>""" % (uuid[nodeid], liveset, liveset, liveset, liveset)
+    else:
+        out+= """
+    <host_raw_data>
+      <HostID>%s</HostID>
+      <time_since_last_update_on_statefile>7304</time_since_last_update_on_statefile>
+      <time_since_last_heartbeat>3839</time_since_last_heartbeat>
+      <time_since_xapi_restart_first_attempted>-1</time_since_xapi_restart_first_attempted>
+      <xapi_error_string></xapi_error_string>
+      <heartbeat_active_list_on_heartbeat>
+      </heartbeat_active_list_on_heartbeat>
+      <heartbeat_active_list_on_statefile>
+      </heartbeat_active_list_on_statefile>
+      <statefile_active_list_on_heartbeat>
+      </statefile_active_list_on_heartbeat>
+      <statefile_active_list_on_statefile>
+      </statefile_active_list_on_statefile>
+    </host_raw_data>""" % (uuid[nodeid])
+
+out += """
+  </raw_status_on_local_host>
+  <timeout>
+    <T1>60000</T1>
+    <T2>60000</T2>
+    <T3>120000</T3>
+    <Wh>60000</Wh>
+    <Ws>75000</Ws>
+  </timeout>
+  <warning_on_local_host>
+    <statefile_lost>FALSE</statefile_lost>
+    <heartbeat_approaching_timeout>FALSE</heartbeat_approaching_timeout>
+    <statefile_approaching_timeout>FALSE</statefile_approaching_timeout>
+    <Xapi_healthcheck_approaching_timeout>FALSE</Xapi_healthcheck_approaching_timeout>
+    <network_bonding_error>FALSE</network_bonding_error>
+  </warning_on_local_host>
+</ha_liveset_info>
+"""
+
+print out

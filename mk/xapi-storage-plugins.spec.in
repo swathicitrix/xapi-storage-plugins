@@ -33,6 +33,7 @@ make install
 %{_libexecdir}/xapi-storage-script/volume/
 /usr/lib/python2.7/site-packages/xapi/storage/libs/
 %{_sysconfdir}/xapi.d/plugins/
+/usr/libexec/xapi/cluster-stack/corosync/
 
 %post
 echo '@DLM_CONFIG@' >> /etc/sysconfig/dlm

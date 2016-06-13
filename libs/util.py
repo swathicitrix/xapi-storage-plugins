@@ -75,6 +75,9 @@ def get_current_host():
 
     Tightly bound to xcp & XenAPI, mock out for Unit Tests
     """
+    import socket
+    return socket.gethostname()
+
     import xcp.environ
     import XenAPI
 

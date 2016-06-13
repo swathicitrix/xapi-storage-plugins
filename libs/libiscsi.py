@@ -259,11 +259,14 @@ def setInitiatorName(dbg, iqn):
         fd.write('InitiatorName=%s\n' % (iqn))
 
 def getCurrentInitiatorName(dbg):
-    with open('/etc/iscsi/initiatorname.iscsi', "r") as fd:
-        lines = fd.readlines()
-        for line in lines:
-            if not line.strip().startswith("#") and "InitiatorName" in line:
-               return line.split('=')[1].strip()
+    try:
+        with open('/etc/iscsi/initiatorname.iscsi', "r") as fd:
+            lines = fd.readlines()
+            for line in lines:
+                if not line.strip().startswith("#") and "InitiatorName" in line:
+                    return line.split('=')[1].strip()
+    except:
+        return None
 
 
 def restartISCSIDaemon(dbg):
@@ -279,7 +282,9 @@ def isISCSIDaemonRunning(dbg):
  
 def configureISCSIDaemon(dbg):
     # Find out what the user wants the IQN to be
-    iqn = getDesiredInitiatorName(dbg)
+    iqn = getCurrentInitiatorName(dbg)
+    if iqn == None:
+        iqn = getDesiredInitiatorName(dbg)
  
     # Make that the IQN, if possible
     if not isISCSIDaemonRunning(dbg):

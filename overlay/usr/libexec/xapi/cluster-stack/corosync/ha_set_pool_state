@@ -1,0 +1,3 @@
+#!/bin/bash
+
+logger ha_set_pool_state $@

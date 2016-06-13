@@ -1,0 +1,38 @@
+#!/bin/bash
+
+TIMEOUT=60
+
+logger ha_propose_master $@
+
+dir=$(dirname $(readlink -f $0))
+
+path=$($dir/get_ha_sr_mount.py)
+logger "HA SR path is $path"
+
+# Begin trying to acquire the master lock
+nohup $dir/acquire_master_lock.py "$path" &
+
+master_file=$path/.ha/master/state.json
+hostname=$(hostname)
+
+# Wait until acquire_master_lock would have at least tried to get the lock
+sleep 1
+
+# Check whether we succeeded.
+for ((i=0; i<$TIMEOUT; i++))
+do
+	# check state file
+	master=$(cat "$master_file" | python -mjson.tool | fgrep master | awk -F\" '{print $4}')
+	logger "Iteration $i: master is '$master'"
+	if [ "x$master" = "x$hostname" ]
+	then
+		logger "returning TRUE because this host is master -- at this point we should tell xapi"
+		echo "TRUE"
+		exit
+	fi
+	sleep 1
+done
+
+# Give up trying; tell xapi we're not the master
+logger "timed out, this host tried and failed to become master"
+echo "FALSE"
