@@ -46,7 +46,7 @@ set -u
 
     # Test the libs
     PYTHONPATH="`echo "$LIBDIRS" | tr ' ' ':'`" \
-    coverage run $(which nosetests) \
+    coverage run --branch $(which nosetests) \
         --with-xunit                \
         --xunit-file=nosetests-libs.xml  \
         $LIBTESTS
