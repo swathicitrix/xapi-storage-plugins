@@ -4,13 +4,24 @@ import sqlite3
 from contextlib import contextmanager
 
 class VDI(object):
-    def __init__(self, row):
-        self.uuid = row['uuid']
-        self.name = row['name']
-        self.description = row['description']
-        self.active_on = row['active_on']
-        self.nonpersistent = row['nonpersistent']
-        self.vhd = VHD.from_row(row)
+    def __init__(self, uuid, name, description, active_on, nonpersistent, vhd):
+        self.uuid = uuid
+        self.name = name
+        self.description = description
+        self.active_on = active_on
+        self.nonpersistent = nonpersistent
+        self.vhd = vhd
+
+    @classmethod
+    def from_row(cls, row):
+        vhd = VHD.from_row(row)
+        return cls(
+            row['uuid'],
+            row['name'],
+            row['description'],
+            row['active_on'],
+            row['nonpersistent'],
+            vhd)
 
 class VHD(object):
     def __init__(self, vhd_id, parent, snap, vsize, psize, gc_status = None):
@@ -166,7 +177,7 @@ class VhdMetabase(object):
 
         row = res.fetchone()
         if (row):
-            return VDI(row)
+            return VDI.from_row(row)
 
         return None
 
@@ -181,7 +192,7 @@ class VhdMetabase(object):
 
         vdis = []
         for row in res:
-            vdis.append(VDI(row))
+            vdis.append(VDI.from_row(row))
 
         return vdis
 
