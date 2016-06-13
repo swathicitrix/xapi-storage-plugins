@@ -1,0 +1,8 @@
+#!/bin/bash
+
+logger ha_start_daemon $@
+
+dir=$(dirname $(readlink -f $0))
+
+# Publish static info about this host
+$dir/publish-host-info.sh

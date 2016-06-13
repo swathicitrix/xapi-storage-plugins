@@ -21,6 +21,7 @@ from xapi.storage.libs import util
 
 import gfs2
 import fence_tool
+import time
 
 # For a block device /a/b/c, we will mount it at <mountpoint_root>/a/b/c
 mountpoint_root = "/var/run/sr-mount/"
@@ -246,34 +247,69 @@ class Implementation(xapi.storage.api.volume.SR_skeleton):
         import shelve
         log.debug("%s: SR.attach: uri=%s" % (dbg, uri))
 
-        # Notify other pool members we have arrived
-        inventory = xcp.environ.readInventory()
-        session = XenAPI.xapi_local()
-        session.xenapi.login_with_password("root", "")
-        this_host = session.xenapi.host.get_by_uuid(
-            inventory.get("INSTALLATION_UUID"))
-        # FIXME: Do not notify offline hosts
-        # FIXME: See ffs.call_plugin_in_pool()
-        for host in session.xenapi.host.get_all():
-            log.debug("%s: refresh host %s config file" % (dbg, session.xenapi.host.get_name_label(host)))
-            session.xenapi.host.call_plugin(
-                host, "gfs2setup", "gfs2UpdateConf", {})
-
-        for host in session.xenapi.host.get_all():
-            if host != this_host:
-                log.debug("%s: setup host %s" % (dbg, session.xenapi.host.get_name_label(host)))
-                session.xenapi.host.call_plugin(
-                    host, "gfs2setup", "gfs2Reload", {})
-
-        # this_host will reload last
-        log.debug("%s: refresh host %s" % (dbg, session.xenapi.host.get_name_label(this_host)))
-        session.xenapi.host.call_plugin(
-            this_host, "gfs2setup", "gfs2Reload", {})
-
         # Zone in the LUN on this host
         dev_path = plug_device(dbg, uri)
-
         unique_id = get_unique_id_from_dev_path(dev_path)
+        gfs2_dev_path = "/dev/" + unique_id + "/gfs2"
+        tmp_mnt_check = getSRMountPath(dbg, gfs2_dev_path, False)
+
+        try:
+            if os.path.ismount(tmp_mnt_check):
+                log.debug("%s: SR.attach: uri=%s ALREADY ATTACHED" % (dbg, uri))
+                return "file://" + tmp_mnt_check
+        except:
+            log.debug("%s: SR.attach: uri=%s NOT ATTACHED YET" % (dbg, uri))
+
+        for attempt in range(1,20):
+            try:
+                output = call(dbg, ["/usr/bin/systemctl", "is-active", "corosync"]).rstrip()
+                break
+            except:
+                time.sleep(1)
+
+        if output != "active":
+            # Notify other pool members we have arrived
+            inventory = xcp.environ.readInventory()
+            session = XenAPI.xapi_local()
+            session.xenapi.login_with_password("root", "")
+            this_host = session.xenapi.host.get_by_uuid(
+                inventory.get("INSTALLATION_UUID"))
+            # FIXME: Do not notify offline hosts
+            # FIXME: See ffs.call_plugin_in_pool()
+            for host in session.xenapi.host.get_all():
+                log.debug("%s: refresh host %s config file" % (dbg, session.xenapi.host.get_name_label(host)))
+                session.xenapi.host.call_plugin(
+                    host, "gfs2setup", "gfs2UpdateConf", {})
+
+            for host in session.xenapi.host.get_all():
+                if host != this_host:
+                    log.debug("%s: setup host %s" % (dbg, session.xenapi.host.get_name_label(host)))
+                    session.xenapi.host.call_plugin(
+                        host, "gfs2setup", "gfs2Reload", {})
+
+            # this_host will reload last
+            log.debug("%s: refresh host %s" % (dbg, session.xenapi.host.get_name_label(this_host)))
+            session.xenapi.host.call_plugin(
+                this_host, "gfs2setup", "gfs2Reload", {})
+
+        else:
+
+            sysconfigdlm = open("/etc/sysconfig/dlm", "w")
+            sysconfigdlm.write("DLM_CONTROLD_OPTS=\"--enable_fencing=1 --enable_quorum_fencing=1 -K\"\n")
+            sysconfigdlm.close()
+
+            conf = """fence_all /usr/libexec/xapi-storage-script/volume/org.xen.xapi.storage.gfs2/fence_tool.py
+"""
+            if not os.path.exists("/etc/dlm"):
+                os.mkdir("/etc/dlm")
+
+            dlmconf = open("/etc/dlm/dlm.conf", "w")
+            dlmconf.write(conf)
+            dlmconf.close()
+
+            call(dbg, ["/usr/sbin/modprobe", "dlm"])
+            call(dbg, ["/usr/sbin/modprobe", "gfs2"])
+            call(dbg, ["/usr/sbin/modprobe", "xen_wdt"])
 
         # activate sbd LV
         cmd = ["/usr/sbin/lvchange", "-ay", unique_id + "/sbd"]
@@ -311,8 +347,6 @@ class Implementation(xapi.storage.api.volume.SR_skeleton):
         cmd = ["/usr/sbin/lvchange", "-ay", unique_id + "/gfs2"]
         call(dbg, cmd)
 
-        gfs2_dev_path = "/dev/" + unique_id + "/gfs2"
-
         # Mount the gfs2 filesystem
         mnt_path = mount(dbg, gfs2_dev_path)
         log.debug("%s: mounted on %s" % (dbg, mnt_path))
@@ -320,7 +354,7 @@ class Implementation(xapi.storage.api.volume.SR_skeleton):
         sr = "file://" + mnt_path
 
         # Start GC for this host
-        libvhd.startGC(dbg, "gfs2", sr)
+        #libvhd.startGC(dbg, "gfs2", sr)
 
         return sr
 
@@ -437,7 +471,8 @@ class Implementation(xapi.storage.api.volume.SR_skeleton):
 
         # stop GC
         try:
-            libvhd.stopGC(dbg, "gfs2", sr)
+            pass
+            #libvhd.stopGC(dbg, "gfs2", sr)
         except:
             log.debug("GC already stopped")
 
