@@ -4,32 +4,69 @@ CFLAGS := -g -Wall
 LDFLAGS :=
 LDLIBS :=
 
-COMP = $(CC) $(CFLAGS) $(CFLAGS_TGT) -c -o $@ $<
+# Create temporary dependency files
+# as a side-effect of compilation
+DEPFLAGS = -MT $@ -MMD -MP -MF $*.Td
+
+# Rename the generated temporary dependency file to
+# the real dependency file. We do this in a separate
+# step so that failures during the compilation won’t
+# leave a corrupted dependency file.
+POSTCOMPILE = mv -f $*.Td $*.d
+
+COMPILE = $(CC) $(DEPFLAGS) $(CFLAGS) $(CFLAGS_TGT) -c -o $@ $<
 LINK = $(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
 %.o: %.c
-	$(COMP)
+%.o: %.c %.d
+	$(COMPILE)
+	$(POSTCOMPILE)
 
-#
+# Create a pattern rule with an empty recipe,
+# so that make won’t fail if the dependency
+# file doesn’t exist.
+%.d: ;
+
+# Do not delete .d files automatically
+.PRECIOUS: %.d
+
+# Create object and dependency files
+# from single source file
+#   - $(1): <program_name>
+#   - $(2): <CFLAGS_TGT>
+define c-prog-compile
+C_PROG_DIR := $(PLUGIN_DIR)/$(1)
+SOURCES := $$(wildcard $$(C_PROG_DIR)/*.c)
+OBJECTS := $$(SOURCES:%.c=%.o)
+DEPS := $$(SOURCES:%.c=%.d)
+
+$$(C_PROG_DIR)/%.o: CFLAGS_TGT := -I$$(C_PROG_DIR) $(2)
+
+-include $$(DEPS)
+CLEAN += $$(OBJECTS) $$(DEPS)
+endef
+
+# Compile and link in one step
 #   - $(1): <program_name>
 #   - $(2): <CFLAGS_TGT>
 #   - $(3): <LDFLAGS>
 #   - $(4): <LDLIBS>
-define create-c-prog-rule
-PROGRAM := $(SM_PLUGINS_DIR)/$(PLUGIN_DIR)/$(1)
-SOURCES := $$(wildcard $(PLUGIN_DIR)/$(1)/*.c)
-OBJECTS := $$(SOURCES:%.c=%.o)
+define c-prog-complink
+$$(eval $$(call c-prog-compile,$(1),$(2)))
 
-$(PLUGIN_DIR)/$(1)/%.o: CFLAGS_TGT := $(2)
+PROGRAM := $$(C_PROG_DIR)/$(1)
+PROGRAM_OUT := $(SM_PLUGINS_DIR)/$$(C_PROG_DIR)
 
 $$(PROGRAM): LDFLAGS := $(3)
 $$(PROGRAM): LDLIBS := $(4)
 $$(PROGRAM): $$(OBJECTS)
 	$$(LINK)
-	chmod 0755 $$@
 
-CLEAN += $$(OBJECTS)
-FILES_OUT += $$(PROGRAM)
+$$(PROGRAM_OUT): $$(PROGRAM)
+	$$(INSTALL_BIN)
+
+FILES_OUT += $$(PROGRAM_OUT)
+CLEAN += $$(PROGRAM)
 endef
 
 # Used to substitue spaces
@@ -37,13 +74,14 @@ NOOP :=
 SPACE := $(NOOP) $(NOOP)
 
 SYMLINK := ln -s
+INSTALL_BIN = install -m 0755 -D $< $@
+INSTALL_DATA = install -m 0644 -D $< $@
 
 # Returns '#!' if file is executable
 #   - $(1): <path_to_file>
 is-executable = $(findstring \#!,$(shell head -n 1 $(1)))
 
-install-recipe = $(if $(call is-executable,$<), \
-    install -m 0755 -D $< $@,install -m 0644 -D $< $@)
+install-recipe = $(if $(call is-executable,$<),$(INSTALL_BIN),$(INSTALL_DATA))
 
 # Construct decorated rule from executable file
 # (has the form:  @<target_1>@...@<target_n>-><prerequisite>)

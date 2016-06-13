@@ -1,1 +1,1 @@
-$(eval $(call create-c-prog-rule,xs-corosync-fence,-D_GNU_SOURCE,,))
+$(eval $(call c-prog-complink,xs-corosync-fence,-D_GNU_SOURCE,,))
