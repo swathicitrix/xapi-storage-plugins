@@ -4,6 +4,8 @@ from xapi.storage.libs import log
 MSIZE_MB = 2 * 1024 * 1024
 OPT_LOG_ERR = "--debug"
 
+VHD_UTIL_BIN = '/usr/bin/vhd-util'
+
 def __num_bits(val):
     count = 0
     while val:
@@ -18,46 +20,46 @@ def __count_bits(bitmap):
     return count
 
 def is_empty(dbg, vol_path):
-    cmd = ["/usr/bin/vhd-util", "read", OPT_LOG_ERR, "-B", "-n", vol_path]
+    cmd = [VHD_UTIL_BIN, "read", OPT_LOG_ERR, "-B", "-n", vol_path]
     ret = call(dbg, cmd)
     return __count_bits(ret) == 0
 
 def create(dbg, vol_path, size_mib):
-    cmd = ["/usr/bin/vhd-util", "create", "-n", vol_path,
+    cmd = [VHD_UTIL_BIN, "create", "-n", vol_path,
            "-s", str(size_mib), "-S", str(MSIZE_MB)]
     return call(dbg, cmd)
 
 def resize(dbg, vol_path, size_mib):
-    cmd = ["/usr/bin/vhd-util", "resize", "-n", vol_path,
+    cmd = [VHD_UTIL_BIN, "resize", "-n", vol_path,
            "-s", str(size_mib), "-f"]
     return call(dbg, cmd)
 
 def reset(dbg, vol_path):
     "zero out the disk (kill all data inside the VHD file)"
-    cmd = ["/usr/bin/vhd-util", "modify", OPT_LOG_ERR, "-z", "-n", vol_path]
+    cmd = [VHD_UTIL_BIN, "modify", OPT_LOG_ERR, "-z", "-n", vol_path]
     return call(dbg, cmd)
 
 def snapshot(dbg, vol_path, snap_path):
-    cmd = ["/usr/bin/vhd-util", "snapshot",
+    cmd = [VHD_UTIL_BIN, "snapshot",
            "-n", snap_path, "-p", vol_path, "-S", str(MSIZE_MB)]
     return call(dbg, cmd)
 
 def get_parent(dbg, vol_path):
-    cmd = ["/usr/bin/vhd-util", "query", "-n", vol_path, "-p"]
+    cmd = [VHD_UTIL_BIN, "query", "-n", vol_path, "-p"]
     return call(dbg, cmd).rstrip()
 
 def get_vsize(dbg, vol_path):
     # vsize is returned in MB but we want to return bytes
-    cmd = ["/usr/bin/vhd-util", "query", "-n", vol_path, "-v"]
+    cmd = [VHD_UTIL_BIN, "query", "-n", vol_path, "-v"]
     out = call(dbg, cmd).rstrip()
     return int(out) * 1024 * 1024
 
 def get_psize(dbg, vol_path):
-    cmd = ["/usr/bin/vhd-util", "query", "-n", vol_path, "-s"]
+    cmd = [VHD_UTIL_BIN, "query", "-n", vol_path, "-s"]
     return call(dbg, cmd).rstrip()
 
 def set_parent(dbg, vol_path, parent_path):
-    cmd = ["/usr/bin/vhd-util", "modify",
+    cmd = [VHD_UTIL_BIN, "modify",
            "-n", vol_path, "-p", parent_path]
     return call(dbg, cmd)
 
