@@ -14,9 +14,7 @@ class StubVhdMetabase(VhdMetabase.VhdMetabase):
                 print row
 
     def populate_test_set_1(self):
-        """
-        TBD: Describe the data set
-        """
+        """ Populate the database with some simple test data """
         with self.write_context():
             vhd = self.insert_new_vhd(10*1024)
             self.insert_vdi("VDI1", "First VDI", str(1), vhd.id)
@@ -24,6 +22,34 @@ class StubVhdMetabase(VhdMetabase.VhdMetabase):
             parent = self.insert_new_vhd(20*1024)
             vhd = self.insert_child_vhd(parent.id, 20*1024)
             self.insert_vdi("Child1", "First Child VDI", str(2), vhd.id)
+
+    def populate_test_set_2(self):
+        """ Populate the database with some test data for coalesce tests.
+            |                           1
+            |                          / \
+            |                         2   3*
+            |                        / \
+            |                       4   5*
+            |                      / \
+            |                     6*  7*
+            *'d nodes have VDIs
+        """
+        with self.write_context():
+            vhd1 = self.insert_new_vhd(10*1024)
+
+            vhd2 = self.insert_child_vhd(vhd1.id, 10*1024)
+            vhd3 = self.insert_child_vhd(vhd1.id, 10*1024)
+
+            vhd4 = self.insert_child_vhd(vhd2.id, 10*1024)
+            vhd5 = self.insert_child_vhd(vhd2.id, 10*1024)
+
+            vhd6 = self.insert_child_vhd(vhd4.id, 10*1024)
+            vhd7 = self.insert_child_vhd(vhd4.id, 10*1024)
+
+            self.insert_vdi("VDI1", "First VDI", str(1), vhd6.id)
+            self.insert_vdi("Snap1", "First Snapshot", str(2), vhd3.id)
+            self.insert_vdi("Snap2", "Second Snapshot", str(3), vhd5.id)
+            self.insert_vdi("Snap3", "Third Snapshot", str(4), vhd7.id)
 
 class VhdMetabaseTest(unittest.TestCase):
 
@@ -183,4 +209,38 @@ class VhdMetabaseTest(unittest.TestCase):
         children = self.subject.get_children(2)
         self.assertEquals(1, len(children))
 
- 
+    def test_find_non_leaf_coalesce_none_success(self):
+        self.subject.populate_test_set_2()
+
+        vdis = self.subject.find_non_leaf_coalesceable()
+
+        self.assertEquals(0, len(vdis))
+
+    def test_find_non_leaf_coalesce_one_success(self):
+        self.subject.populate_test_set_2()
+
+        # delete node 5 so that 4 can coalesce to 2
+        self.subject.delete_vdi(3)
+        self.subject.delete_vhd(5)
+
+        vdis = self.subject.find_non_leaf_coalesceable()
+
+        self.assertEquals(1, len(vdis))
+
+    def test_find_leaf_coalesce_none_success(self):
+        self.subject.populate_test_set_2()
+
+        vdis = self.subject.find_leaf_coalesceable()
+
+        self.assertEquals(0, len(vdis))
+
+    def test_find_leaf_coalesce_one_success(self):
+        self.subject.populate_test_set_2()
+
+        # delete node 7 so that 6 can coalesce to 4
+        self.subject.delete_vdi(4)
+        self.subject.delete_vhd(7)
+
+        vdis = self.subject.find_leaf_coalesceable()
+
+        self.assertEquals(1, len(vdis))

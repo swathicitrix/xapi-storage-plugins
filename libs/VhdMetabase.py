@@ -218,6 +218,44 @@ class VhdMetabase(object):
 
         return None
 
+    def find_non_leaf_coalesceable(self):
+        res = self._conn.execute("""
+            SELECT * FROM 
+                   (SELECT *, COUNT(id) as num 
+                      FROM VHD
+                     WHERE parent_id NOT NULL 
+                  GROUP BY parent_id
+            ) as node
+             WHERE node.num = 1 
+               AND node.id IN 
+                   (SELECT parent_id
+                      FROM VHD
+                     WHERE parent_id NOT NULL 
+                  GROUP BY parent_id)""")
+        vhds = []
+        for row in res:
+            vhds.append(VHD.from_row(row))
+        return vhds
+
+    def find_leaf_coalesceable(self):
+        res = self._conn.execute("""
+            SELECT * FROM 
+                   (SELECT *, COUNT(id) as num 
+                      FROM VHD
+                     WHERE parent_id NOT NULL 
+                  GROUP BY parent_id
+            ) as node
+             WHERE node.num = 1 
+               AND node.id NOT IN 
+                   (SELECT parent_id
+                      FROM VHD
+                     WHERE parent_id NOT NULL 
+                  GROUP BY parent_id)""")
+        vhds = []
+        for row in res:
+            vhds.append(VHD.from_row(row))
+        return vhds
+
     @contextmanager
     def write_context(self):
         with self._conn:
