@@ -5,14 +5,15 @@ import sqlite3
 import os
 import urlparse
 import sys
+from contextlib import contextmanager
+
 from xapi.storage.libs import util
 from xapi.storage.libs import vhdutil
 from xapi.storage.libs.util import call
 from xapi.storage.libs import log
-import xapi.storage.libs.poolhelper
+from xapi.storage.libs import poolhelper
 from xapi.storage.libs import VhdMetabase
 from xapi.storage.libs import tapdisk, image
-from contextlib import contextmanager
 
 DP_URI_PREFIX = "vhd+tapdisk://"
 MSIZE_MB = 2 * 1024 * 1024
@@ -98,7 +99,7 @@ def resize(dbg, sr, key, new_size, cb):
 
 def refresh_datapath(dbg, vdi, vol_path, new_vol_path):
     if vdi.active_on:
-        xapi.storage.libs.poolhelper.refresh_datapath_on_host(dbg, vdi.active_on, vol_path, new_vol_path)
+        poolhelper.refresh_datapath_on_host(dbg, vdi.active_on, vol_path, new_vol_path)
 
 def clone(dbg, sr, key, cb):
     snap_uuid = str(uuid.uuid4())
@@ -166,11 +167,8 @@ def stat(dbg, sr, key, cb):
     db = VhdMetabase.VhdMetabase(meta_path)
     with db.write_context():
         vdi = db.get_vdi_by_id(key)
-        vsize = vdi.vhd.vsize
-        if not vsize:
-            # vsize can be None if we crashed during a Volume.resize
-            vsize = vhdutil.get_vsize(dbg, cb.volumeGetPath(opq, str(vdi.vhd.id)))
-            db.update_vhd_vsize(vdi.vhd.id, vsize)
+        _vdi_sanitize(vdi, opq, db, cb)
+
     db.close()
 
     psize = cb.volumeGetPhysSize(opq, str(vdi.vhd.id))
@@ -183,7 +181,7 @@ def stat(dbg, sr, key, cb):
         "name": vdi.name,
         "description": vdi.description,
         "read_write": True,
-        "virtual_size": vsize,
+        "virtual_size": vdi.vhd.vsize,
         "physical_utilisation": psize,
         "uri": [DP_URI_PREFIX + vdi_uri],
         "keys": {}
@@ -199,21 +197,18 @@ def ls(dbg, sr, cb):
         vdis = db.get_all_vdis()
 
     for vdi in vdis:
-        vsize = vdi.vhd.vsize
-        if not vsize:
-            # vsize can be None if we crashed during a Volume.resize
-            with db.write_context():
-                vsize = vhdutil.get_vsize(dbg, cb.volumeGetPath(opq, str(vdi.vhd.id)))
-                db.update_vhd_vsize(vdi.vhd.id, vsize)
+        _vdi_sanitize(vdi, opq, db, cb)
+
         psize = cb.volumeGetPhysSize(opq, str(vdi.vhd.id))
         vdi_uri = cb.getVolumeUriPrefix(opq) + vdi.uuid
+
         results.append({
                 "uuid": vdi.uuid,
                 "key": vdi.uuid,
                 "name": vdi.name,
                 "description": vdi.description,
                 "read_write": True,
-                "virtual_size": vsize,
+                "virtual_size": vdi.vhd.vsize,
                 "physical_utilisation": psize,
                 "uri": [DP_URI_PREFIX + vdi_uri],
                 "keys": {}
@@ -222,6 +217,28 @@ def ls(dbg, sr, cb):
     db.close()
     cb.volumeStopOperations(opq)
     return results
+
+def get_sr_provisioned_size(sr, cb):
+    """Returns tha max space the SR could end up using.
+
+    This is the sum of the physical size of all snapshots,
+    plus the virtual size of all VDIs.
+    """
+    opq = cb.volumeStartOperations(sr, 'w')
+    meta_path = cb.volumeMetadataGetPath(opq)
+
+    db = VhdMetabase.VhdMetabase(meta_path)
+
+    provisioned_size = db.get_non_leaf_total_psize()
+
+    for vdi in db.get_all_vdis():
+        _vdi_sanitize(vdi, opq, db, cb)
+        provisioned_size += vdi.vhd.vsize
+
+    db.close()
+    cb.volumeStopOperations(opq)
+
+    return provisioned_size
 
 def set(dbg, sr, key, k, v, cb):
     return
@@ -248,6 +265,22 @@ def set_property(dbg, sr, key, field, value, cb):
             db.update_vdi_description(vdi.uuid, value)
     db.close()
     cb.volumeStopOperations(opq)
+
+def _vdi_sanitize(vdi, opq, db, cb):
+    """Sanitize vdi metadata object
+
+    When retrieving vdi metadata from the database, it is possible
+    that 'vsize' is 'None', if we crashed during a resize operation.
+    In this case, query the underlying vhd and update 'vsize', both
+    in the object and the database
+    """
+    if vdi.vhd.vsize is None:
+        vdi.vhd.vsize = vhdutil.get_vsize(
+            "",
+            cb.volumeGetPath(opq, str(vdi.vhd.id))
+        )
+
+        db.update_vhd_vsize(vdi.vhd.id, vdi.vhd.vsize)
 
 
 # here we have all datapath facing functions

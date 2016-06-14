@@ -208,8 +208,8 @@ class VhdMetabase(object):
             SELECT *
               FROM vdi
                    INNER JOIN vhd
-                   ON vdi.vhd_id = vhd.id"""
-        )
+                   ON vdi.vhd_id = vhd.id
+        """)
 
         vdis = []
         for row in res:
@@ -238,6 +238,21 @@ class VhdMetabase(object):
             return VHD.from_row(row)
 
         return None
+
+    def get_non_leaf_total_psize(self):
+        """Returns the total psize of non-leaf VHDs"""
+        total_psize = 0
+
+        res = self._conn.execute("""
+            SELECT psize
+              FROM vhd
+             WHERE psize NOT NULL
+        """)
+
+        for row in res:
+            total_psize += row['psize']
+
+        return total_psize
 
     def find_non_leaf_coalesceable(self):
         res = self._conn.execute("""

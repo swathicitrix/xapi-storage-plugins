@@ -43,11 +43,24 @@ def create_datasource_dict(stats_dict, scsi_id):
             0.0,
             'float',
             description='SR ' + scsi_id + ' utilization',
-            datasource_type='gauge',
+            datasource_type='absolute',
             min_val=0.0,
             max_val=100.0,
             units='(fraction)',
             #owner='sr ' + sr_uuid
+            owner='host'
+        )
+
+    if 'overprovision' in stats_dict:
+        ds_dict['overprovision'] = Datasource(
+            'overprovision_' + scsi_id,
+            0.0,
+            'float',
+            description='SR ' + scsi_id + ' overprovision',
+            datasource_type='absolute',
+            min_val=0.0,
+            max_val='inf',
+            units='(fraction)',
             owner='host'
         )
 
@@ -57,8 +70,12 @@ def _get_utilization(stats_dict):
     return ((stats_dict['total_space'] - stats_dict['free_space']) /
         stats_dict['total_space'] * 100)
 
+def _get_overprovision(stats_dict):
+    return stats_dict['overprovision']
+
 get_reading = {
     'utilization': _get_utilization,
+    'overprovision': _get_overprovision,
 }
 
 def run_stats(uri):
