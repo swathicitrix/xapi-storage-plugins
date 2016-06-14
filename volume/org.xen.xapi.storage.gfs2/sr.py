@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+from __future__ import division
 import os
 import os.path
 import sys
@@ -17,6 +18,8 @@ import json
 import xcp.environ
 import XenAPI
 from xapi.storage.libs import util
+
+import gfs2
 import fence_tool
 
 # For a block device /a/b/c, we will mount it at <mountpoint_root>/a/b/c
@@ -476,7 +479,6 @@ class Implementation(xapi.storage.api.volume.SR_skeleton):
         unplug_device(dbg, uri)
 
     def ls(self, dbg, sr):
-        import gfs2
         return libvhd.ls(dbg, sr, gfs2.Callbacks())
 
     def stat(self, dbg, sr):
@@ -494,12 +496,16 @@ class Implementation(xapi.storage.api.volume.SR_skeleton):
         fsize = statvfs.f_bfree * statvfs.f_frsize
         log.debug("%s: statvfs says psize = %Ld" % (dbg, psize))
 
+        overprovision = \
+             libvhd.get_sr_provisioned_size(sr, gfs2.Callbacks()) / psize
+
         return {
             "sr": sr,
             "name": "SR Name",
             "description": "GFS2 SR",
             "total_space": psize,
             "free_space": fsize,
+            "overprovision": overprovision,
             "datasources": [],
             "clustered": True,
             "health": ["Healthy", ""]

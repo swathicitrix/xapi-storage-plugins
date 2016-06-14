@@ -1,6 +1,6 @@
 import unittest
 import uuid
-from xapi.storage.libs import VhdMetabase
+import VhdMetabase
 
 class StubVhdMetabase(VhdMetabase.VhdMetabase):
 

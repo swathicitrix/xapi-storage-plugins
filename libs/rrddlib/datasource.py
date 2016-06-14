@@ -5,7 +5,8 @@ DBL_MIN = -DBL_MAX
 INF = float('inf')
 N_INF = float('-inf')
 
-DS_TYPE_VALS = frozenset(('gauge', 'absolute', 'derive'))
+# Accept old and new ds_types until everyone moves to the new ones
+DS_TYPE_VALS = frozenset(('gauge', 'absolute', 'derive', 'rate', 'absolute_to_rate'))
 VAL_TYPE_VALS = frozenset(('float', 'int64'))
 
 # Mapping of datasource value types to C types
