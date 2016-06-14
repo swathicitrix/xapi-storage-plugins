@@ -4,11 +4,11 @@ import importlib
 import os
 import sys
 import time
-from xapi.storage import log
+from xapi.storage.libs import log
 from xapi.storage.libs import libvhd
-from xapi.storage.common import call
+from xapi.storage.libs.util import call
 import xapi.storage.libs.poolhelper
-
+from xapi.storage.libs import VhdMetabase
 
 def touch(filename):
     if not os.path.exists(os.path.dirname(filename)):
@@ -31,220 +31,195 @@ def get_sr_callbacks(sr_type):
     mod = importlib.import_module(sr_type)
     return mod.Callbacks()
 
-def get_all_nodes(conn):
-    results = conn.execute("select * from VDI")
-    rows = results.fetchall()
-    for row in rows:
-        log.debug("%s" % str(row))
-    totalCount = len(rows)
-    log.debug("Found %s total nodes" % totalCount)
-    return rows
+def find_non_leaf_coalesceable(db):
+    results = db.find_non_leaf_coalesceable()
+    if len(results) > 0:
+        log.debug("Found %s non leaf coalescable nodes" % len(results))
+    return results
 
-def find_non_leaf_coalesceable(conn):
-    results = conn.execute("select * from (select key, parent, gc_status, count(key) as num from VDI where parent not null group by parent)t where t.num=1 and key in ( select parent from vdi where parent not null group by parent)")
-    rows = results.fetchall()
-    if len(rows) > 0:
-        log.debug("Found %s non leaf coalescable nodes" % len(rows))
-    return rows
+#def find_leaf_coalesceable(db):
+#    results = db.find_leaf_coalesceable()
+#    for row in results:
+#        log.debug("%s" % str(row))
+#    log.debug("Found %s leaf coalescable nodes" % len(results))
+#    return results
 
-def find_leaf_coalesceable(conn):
-    results = conn.execute("select * from (select key, parent, gc_status, count(key) as num from VDI where parent not null group by parent)t where t.num=1 and key not in ( select parent from vdi where parent not null group by parent)")
-    rows = results.fetchall()
-    for row in rows:
-        log.debug("%s" % str(row))
-    log.debug("Found %s leaf coalescable nodes" % len(rows))
-    return rows
-
-def find_leaves(key, conn, leaf_accumulator):
-    leaf_results = conn.execute("select key from VDI where parent = ?", (int(key),))
-
-    children = leaf_results.fetchall()
+def find_leaves(vhd, db, leaf_accumulator):
+    children = db.get_children(vhd.id)
 
     if len(children) == 0:
         # This is a leaf add it to list
-        leaf_accumulator.append(key)
+        leaf_accumulator.append(vhd)
     else:
         for child in children:
-            find_leaves(str(child[0]), conn, leaf_accumulator)
+            find_leaves(child.id, db, leaf_accumulator)
 
-def find_root_node(key, conn):
-    res = conn.execute("select parent from VDI where rowid = ?", (int(key),)).fetchall()
-    parent = res[0]["parent"]
-    if parent == None:
+def find_root_node(key, db):
+    if key.parent_id == None:
         log.debug("Found root node %s" % key)
         return key
     else:
-        return find_root_node(parent, conn)
+        parent = db.get_vhd_by_id(key.parent_id)
+        return find_root_node(parent, db)
 
-def tap_ctl_pause(key, conn, cb, opq):
-    key_path = cb.volumeGetPath(opq, key)
-    res = conn.execute("select active_on from VDI where key = ?", (int(key),)).fetchall()
-    active_on = res[0][0]
-    if active_on:
-        log.debug("Key %s active on %s" % (key, active_on))
-        xapi.storage.libs.poolhelper.suspend_datapath_on_host("GC", active_on, key_path)
+def tap_ctl_pause(node, db, cb, opq):
+    node_path = cb.volumeGetPath(opq, node.id)
+    if node.active_on:
+        log.debug("Node %s active on %s" % (node.id, active_on))
+        xapi.storage.libs.poolhelper.suspend_datapath_on_host("GC", active_on, node_path)
 
-def tap_ctl_unpause(key, conn, cb, opq):
-    key_path = cb.volumeGetPath(opq, key)
-    res = conn.execute("select active_on from VDI where key = ?", (int(key),)).fetchall()
-    active_on = res[0][0]
-    if active_on:
-        log.debug("Key %s active on %s" % (key, active_on))
-        xapi.storage.libs.poolhelper.resume_datapath_on_host("GC", active_on, key_path)
+def tap_ctl_unpause(node, cb, opq):
+    node_path = cb.volumeGetPath(opq, node)
+    if node.active_on:
+        log.debug("Node %s active on %s" % (node, active_on))
+        xapi.storage.libs.poolhelper.resume_datapath_on_host("GC", active_on, node_path)
 
-def leaf_coalesce_snapshot(key, conn, cb, opq):
-    log.debug("leaf_coalesce_snapshot key=%s" % key)
-    key_path = cb.volumeGetPath(opq, key)
+# def leaf_coalesce_snapshot(key, conn, cb, opq):
+#     log.debug("leaf_coalesce_snapshot key=%s" % key)
+#     key_path = cb.volumeGetPath(opq, key)
 
-    res = conn.execute("select name,parent,description,uuid,vsize from VDI where rowid = (?)",
-                       (int(key),)).fetchall()
-    (p_name, p_parent, p_desc, p_uuid, p_vsize) = res[0]
+#     res = conn.execute("select name,parent,description,uuid,vsize from VDI where rowid = (?)",
+#                        (int(key),)).fetchall()
+#     (p_name, p_parent, p_desc, p_uuid, p_vsize) = res[0]
     
-    tap_ctl_pause(key, conn, cb, opq)
-    res = conn.execute("insert into VDI(snap, parent) values (?, ?)",
-                       (0, p_parent))
-    base_name = str(res.lastrowid)
-    base_path = cb.volumeRename(opq, key, base_name)
-    cb.volumeCreate(opq, key, int(p_vsize))
+#     tap_ctl_pause(key, conn, cb, opq)
+#     res = conn.execute("insert into VDI(snap, parent) values (?, ?)",
+#                        (0, p_parent))
+#     base_name = str(res.lastrowid)
+#     base_path = cb.volumeRename(opq, key, base_name)
+#     cb.volumeCreate(opq, key, int(p_vsize))
 
-    cmd = ["/usr/bin/vhd-util", "snapshot",
-           "-n", key_path, "-p", base_path]
-    output = call("GC", cmd)
+#     cmd = ["/usr/bin/vhd-util", "snapshot",
+#            "-n", key_path, "-p", base_path]
+#     output = call("GC", cmd)
         
-    res = conn.execute("update VDI set parent = (?) where rowid = (?)",
-                           (int(base_name), int(key),) )
-    conn.commit()
+#     res = conn.execute("update VDI set parent = (?) where rowid = (?)",
+#                            (int(base_name), int(key),) )
+#     conn.commit()
 
-    tap_ctl_unpause(key, conn, cb, opq)
+#     tap_ctl_unpause(key, conn, cb, opq)
 
-def non_leaf_coalesce(key, parent_key, uri, cb):
-    log.debug ("non_leaf_coalesce key=%s, parent=%s" % (key, parent_key))
-    #conn.execute("key is coalescing")
+def non_leaf_coalesce(node, parent, uri, cb):
+    log.debug ("non_leaf_coalesce key=%s, parent=%s" % (node.id, parent.id))
+    #conn.execute("node is coalescing")
 
     opq = cb.volumeStartOperations(uri, 'w')
     meta_path = cb.volumeMetadataGetPath(opq)
 
-    key_path = cb.volumeGetPath(opq, key)
-    parent_path = cb.volumeGetPath(opq, parent_key)
+    node_path = cb.volumeGetPath(opq, node.id)
+    parent_path = cb.volumeGetPath(opq, parent.id)
 
-    log.debug("Running vhd-coalesce on %s" % key)
-    cmd = ["/usr/bin/vhd-util", "coalesce", "-n", key_path]
+    log.debug("Running vhd-coalesce on %s" % node.id)
+    cmd = ["/usr/bin/vhd-util", "coalesce", "-n", node_path]
     call("GC", cmd)
 
-    #conn.execute("key coalesced")
-
-    conn = libvhd.connectSQLite3(meta_path)
+    db = VhdMetabase.VhdMetabase(meta_path)
     with libvhd.Lock(opq, "gl", cb):
         # reparent all of the children to this node's parent
-        children = conn.execute("select key from VDI where parent = (?)",
-                                (int(key),)).fetchall()
-        # log.debug("List of childrens: %s" % children)
+        children = db.get_children(node.id)
+        # log.debug("List of children: %s" % children)
         for child in children:
-            child_key = str(child[0])
-            child_path = cb.volumeGetPath(opq, child_key)
+            child_path = cb.volumeGetPath(opq, child.id)
 
-            # pause all leafs having child as an ancestor
+            # pause all leaves having child as an ancestor
             leaves = []
-            find_leaves(child_key, conn, leaves)
-            log.debug("Children %s: pausing all leafes: %s" % (child_key,leaves))
+            find_leaves(child, db, leaves)
+            log.debug("Children %s: pausing all leaves: %s" % (child.id, leaves))
             for leaf in leaves:
-                tap_ctl_pause(leaf, conn, cb, opq)
+                tap_ctl_pause(leaf, cb, opq)
 
             # reparent child to grandparent
-            log.debug("Reparenting %s to %s" % (child_key, parent_key))
-            res = conn.execute("update VDI set parent = (?) where rowid = (?)",
-                               (parent_key, child_key,) )
-            cmd = ["/usr/bin/vhd-util", "modify", "-n", child_path, "-p", parent_path]
-            call("GC", cmd)
+            log.debug("Reparenting %s to %s" % (child_key, parent.id))
+            with db.write_context():
+                db.update_vhd_parent(child.id, parent.id)
+                cmd = ["/usr/bin/vhd-util", "modify", "-n", child_path, "-p", parent_path]
+                call("GC", cmd)
 
-            conn.commit()
-
-            # unpause all leafs having child as an ancestor
-            log.debug("Children %s: unpausing all leafes: %s" % (child_key,leaves))
+            # unpause all leaves having child as an ancestor
+            log.debug("Children %s: unpausing all leaves: %s" % (child.id, leaves))
             for leaf in leaves:
-                tap_ctl_unpause(leaf, conn, cb, opq)
+                tap_ctl_unpause(leaf, cb, opq)
 
-        root_node = find_root_node(key, conn)
+        root_node = find_root_node(key, db)
         log.debug("Setting gc_status to None root node %s" % root_node)
-        conn.execute("update VDI set gc_status = (?) where rowid = (?)",
-                     (None, int(root_node),) )
-        conn.commit()
+        with db.write_context():
+            db.update_vhd_gc_status(root_node.id, None)
 
         # remove key
         log.debug("Destroy %s" % key)
         cb.volumeDestroy(opq, key)
-        res = conn.execute("delete from VDI where rowid = (?)", (int(key),))
-        conn.commit()
+        with db.write_context():
+            db.delete_vdi(key.id)
 
-    conn.close()
+    db.close()
 
-def sync_leaf_coalesce(key, parent_key, conn, cb, opq):
-    log.debug("leaf_coalesce_snapshot key=%s" % key)
-    key_path = cb.volumeGetPath(opq, key)
-    parent_path = cb.volumeGetPath(opq, parent_key)
+# def sync_leaf_coalesce(key, parent_key, conn, cb, opq):
+#     log.debug("leaf_coalesce_snapshot key=%s" % key)
+#     key_path = cb.volumeGetPath(opq, key)
+#     parent_path = cb.volumeGetPath(opq, parent_key)
 
-    res = conn.execute("select parent from VDI where rowid = (?)",
-                       (int(parent_key),)).fetchall()
-    p_parent = res[0][0]
-    log.debug("%s" % str(p_parent))
-    if p_parent:
-        p_parent = int(p_parent)
-    else:
-        p_parent = "?"
+#     res = conn.execute("select parent from VDI where rowid = (?)",
+#                        (int(parent_key),)).fetchall()
+#     p_parent = res[0][0]
+#     log.debug("%s" % str(p_parent))
+#     if p_parent:
+#         p_parent = int(p_parent)
+#     else:
+#         p_parent = "?"
     
 
-    tap_ctl_pause(key, conn, cb, opq)
+#     tap_ctl_pause(key, conn, cb, opq)
 
-    cmd = ["/usr/bin/vhd-util", "coalesce", "-n", key_path]
-    call("GC", cmd)
+#     cmd = ["/usr/bin/vhd-util", "coalesce", "-n", key_path]
+#     call("GC", cmd)
 
-    cb.volumeDestroy(opq, key)
-    base_path = cb.volumeRename(opq, parent_key, key)
+#     cb.volumeDestroy(opq, key)
+#     base_path = cb.volumeRename(opq, parent_key, key)
 
-    res = conn.execute("delete from VDI where rowid = (?)", (int(parent_key),))
-    res = conn.execute("update VDI set parent = (?) where rowid = (?)",
-                       (p_parent, int(key),) )
-    conn.commit()
+#     res = conn.execute("delete from VDI where rowid = (?)", (int(parent_key),))
+#     res = conn.execute("update VDI set parent = (?) where rowid = (?)",
+#                        (p_parent, int(key),) )
+#     conn.commit()
 
-    tap_ctl_unpause(key, conn, cb, opq)
+#     tap_ctl_unpause(key, conn, cb, opq)
 
-def leaf_coalesce(key, parent_key, conn, cb, opq):
-    log.debug("leaf_coalesce key=%s, parent=%s" % (key, parent_key))
-    psize = cb.volumeGetPhysSize(opq, key)
-    if psize > (20 * 1024 * 1024):
-        leaf_coalesce_snapshot(key, conn, cb, opq)
-    else:
-        sync_leaf_coalesce(key, parent_key, conn, cb, opq)
+# def leaf_coalesce(key, parent_key, conn, cb, opq):
+#     log.debug("leaf_coalesce key=%s, parent=%s" % (key, parent_key))
+#     psize = cb.volumeGetPhysSize(opq, key)
+#     if psize > (20 * 1024 * 1024):
+#         leaf_coalesce_snapshot(key, conn, cb, opq)
+#     else:
+#         sync_leaf_coalesce(key, parent_key, conn, cb, opq)
 
-def find_best_non_leaf_coalesceable(rows):
-    return str(rows[0][0]), str(rows[0][1])
+#def find_best_non_leaf_coalesceable(rows):
+#    return str(rows[0][0]), str(rows[0][1])
 
 def find_best_non_leaf_coalesceable_2(uri, cb):
     opq = cb.volumeStartOperations(uri, 'w')
     meta_path = cb.volumeMetadataGetPath(opq)
-    conn = libvhd.connectSQLite3(meta_path)
-    ret = ("None", "None")
+    db = VhdMetabase.VhdMetabase(meta_path)
+    ret = (None, None)
     with libvhd.Lock(opq, "gl", cb):
-        rows = find_non_leaf_coalesceable(conn)
-        for row in rows:
+        print "In coalesceable"
+        nodes = find_non_leaf_coalesceable(db)
+        print "Nodes are {}".format(nodes)
+        for node in nodes:
             #log.debug row
-            if not row["gc_status"]:
-                root_node = find_root_node(row["key"], conn)
-                root_rows = conn.execute("select gc_status from VDI where key = (?)",
-                                (int(root_node),)).fetchall()
-                if not root_rows[0]["gc_status"]:
-                    conn.execute("update VDI set gc_status = (?) where rowid = (?)",
-                                 ("Coalescing", row["key"],) )
-                    conn.execute("update VDI set gc_status = (?) where rowid = (?)",
-                                 ("Coalescing", int(root_node),) )
-                    conn.commit()
-                    ret = (str(row["key"]), str(row["parent"]))
+            print "node gc_status is '{}'".format(node.gc_status)
+            if not node.gc_status:
+                root_node = find_root_node(node, db)
+                print "root gc is '{}'".format(root_node.gc_status)
+                if not root_node.gc_status:
+                    with db.write_context():
+                        db.update_vhd_gc_status(node.id, "Coalescing")
+                        db.update_vhd_gc_status(root_node.id, "Coalescing")
+                    ret = (node, db.get_vhd_by_id(node.parent_id))
                     break
-    conn.close()
+    db.close()
     cb.volumeStopOperations(opq)
     return ret
 
-def demonize():
+def daemonize():
     for fd in [0, 1, 2]:
         try:
             os.close(fd)
@@ -252,7 +227,7 @@ def demonize():
             pass    
 
 def run_coalesce(sr_type, uri):
-    demonize()
+    daemonize()
 
     cb = get_sr_callbacks(sr_type)
     #get_all_nodes(conn)
@@ -267,9 +242,9 @@ def run_coalesce(sr_type, uri):
     touch(gc_running)
 
     while True:
-        key, parent_key = find_best_non_leaf_coalesceable_2(uri, cb)
-        if (key, parent_key) != ("None", "None"):
-            non_leaf_coalesce(key, parent_key, uri, cb)
+        child, parent = find_best_non_leaf_coalesceable_2(uri, cb)
+        if (child, parent) != (None, None):
+            non_leaf_coalesce(child, parent, uri, cb)
         else:
             for i in range(10):
                 if not os.path.exists(gc_running):
@@ -277,12 +252,13 @@ def run_coalesce(sr_type, uri):
                     return
                 time.sleep(3)
 
-    rows = find_leaf_coalesceable(conn)
-    if rows:
-        key, parent_key = find_best_non_leaf_coalesceable(rows)
-        leaf_coalesce(key, parent_key, conn, cb, opq)
+    # No leaf coalesce yet
+    #rows = find_leaf_coalesceable(conn)
+    #if rows:
+    #    key, parent_key = find_best_non_leaf_coalesceable(rows)
+    #    leaf_coalesce(key, parent_key, conn, cb, opq)
 
-    conn.close()
+    #conn.close()
 
 def startGC(dbg, sr_type, uri):
     import subprocess

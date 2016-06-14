@@ -144,6 +144,9 @@ class VhdMetabase(object):
     def update_vhd_psize(self, vhd_id, psize):
         self.__update_vhd(vhd_id, "psize", psize)
 
+    def update_vhd_gc_status(self, vhd_id, gc_status):
+        self.__update_vhd(vhd_id, "gc_status", gc_status)
+
     def __update_vhd(self, vhd_id, key, value):
         res = self._conn.execute("""
             UPDATE vhd

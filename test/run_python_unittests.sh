@@ -81,5 +81,6 @@ set -u
 
     coverage report --include="$SOURCE"
     coverage xml --include="$SOURCE"
+    coverage html --include="$SOURCE"
 )
 
