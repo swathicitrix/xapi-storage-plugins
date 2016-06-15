@@ -331,7 +331,7 @@ def detach(dbg, uri, domain, cb):
     tap.destroy(dbg)
     tapdisk.forget_tapdisk_metadata(dbg, vol_path)
 
-def create_single_clone(conn, sr, key, cb):
+def create_single_clone(db, sr, key, cb):
     pass
 
 def epcopen(dbg, uri, persistent, cb):
@@ -368,7 +368,7 @@ def epcopen(dbg, uri, persistent, cb):
                         db.update_vdi_nonpersistent(vdi.uuid, 1)
                         if (not vhdutil.is_empty(dbg, vol_path)):
                             # Create single clone
-                            create_single_clone(conn, sr, key, cb)
+                            create_single_clone(db, sr, key, cb)
             except:
                 log.error("%s: Datapath.epcopen: failed to complete open, %s"
                           % (dbg, sys.exc_info()[0]))
