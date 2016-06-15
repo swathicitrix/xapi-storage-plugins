@@ -6,7 +6,7 @@ import sys
 import time
 from xapi.storage.libs import log
 from xapi.storage.libs import libvhd
-from xapi.storage.libs.util import call
+from xapi.storage.libs import util
 import xapi.storage.libs.poolhelper
 from xapi.storage.libs import VhdMetabase
 
@@ -46,10 +46,9 @@ def find_non_leaf_coalesceable(db):
 
 def find_leaves(vhd, db, leaf_accumulator):
     children = db.get_children(vhd.id)
-
     if len(children) == 0:
         # This is a leaf add it to list
-        leaf_accumulator.append(vhd)
+        leaf_accumulator.append(db.get_vdi_for_vhd(vhd.id))
     else:
         for child in children:
             find_leaves(child.id, db, leaf_accumulator)
@@ -62,17 +61,17 @@ def find_root_node(key, db):
         parent = db.get_vhd_by_id(key.parent_id)
         return find_root_node(parent, db)
 
-def tap_ctl_pause(node, db, cb, opq):
-    node_path = cb.volumeGetPath(opq, node.id)
+def tap_ctl_pause(node, cb, opq):
     if node.active_on:
-        log.debug("Node %s active on %s" % (node.id, active_on))
-        xapi.storage.libs.poolhelper.suspend_datapath_on_host("GC", active_on, node_path)
+        node_path = cb.volumeGetPath(opq, node.vhd.id)
+        log.debug("VHD %s active on %s" % (node.vhd.id, node.active_on))
+        xapi.storage.libs.poolhelper.suspend_datapath_on_host("GC", node.active_on, node_path)
 
 def tap_ctl_unpause(node, cb, opq):
-    node_path = cb.volumeGetPath(opq, node)
     if node.active_on:
-        log.debug("Node %s active on %s" % (node, active_on))
-        xapi.storage.libs.poolhelper.resume_datapath_on_host("GC", active_on, node_path)
+        node_path = cb.volumeGetPath(opq, node.vhd.id)
+        log.debug("VHD %s active on %s" % (node.vhd.id, node.active_on))
+        xapi.storage.libs.poolhelper.resume_datapath_on_host("GC", node.active_on, node_path)
 
 # def leaf_coalesce_snapshot(key, conn, cb, opq):
 #     log.debug("leaf_coalesce_snapshot key=%s" % key)
@@ -111,7 +110,7 @@ def non_leaf_coalesce(node, parent, uri, cb):
 
     log.debug("Running vhd-coalesce on %s" % node.id)
     cmd = ["/usr/bin/vhd-util", "coalesce", "-n", node_path]
-    call("GC", cmd)
+    util.call("GC", cmd)
 
     db = VhdMetabase.VhdMetabase(meta_path)
     with libvhd.Lock(opq, "gl", cb):
@@ -124,34 +123,35 @@ def non_leaf_coalesce(node, parent, uri, cb):
             # pause all leaves having child as an ancestor
             leaves = []
             find_leaves(child, db, leaves)
-            log.debug("Children %s: pausing all leaves: %s" % (child.id, leaves))
+            log.debug("Children of {}: pausing all leaves: {}".format(child.id, len(leaves)))
             for leaf in leaves:
                 tap_ctl_pause(leaf, cb, opq)
 
             # reparent child to grandparent
-            log.debug("Reparenting %s to %s" % (child_key, parent.id))
+            log.debug("Reparenting %s to %s" % (child.id, parent.id))
             with db.write_context():
                 db.update_vhd_parent(child.id, parent.id)
                 cmd = ["/usr/bin/vhd-util", "modify", "-n", child_path, "-p", parent_path]
-                call("GC", cmd)
+                util.call("GC", cmd)
 
             # unpause all leaves having child as an ancestor
             log.debug("Children %s: unpausing all leaves: %s" % (child.id, leaves))
             for leaf in leaves:
                 tap_ctl_unpause(leaf, cb, opq)
 
-        root_node = find_root_node(key, db)
+        root_node = find_root_node(parent, db)
         log.debug("Setting gc_status to None root node %s" % root_node)
         with db.write_context():
             db.update_vhd_gc_status(root_node.id, None)
 
         # remove key
-        log.debug("Destroy %s" % key)
-        cb.volumeDestroy(opq, key)
+        log.debug("Destroy %s" % node.id)
+        cb.volumeDestroy(opq, node.id)
         with db.write_context():
-            db.delete_vdi(key.id)
+            db.delete_vdi(node.id)
 
     db.close()
+    cb.volumeStopOperations(opq)
 
 # def sync_leaf_coalesce(key, parent_key, conn, cb, opq):
 #     log.debug("leaf_coalesce_snapshot key=%s" % key)
