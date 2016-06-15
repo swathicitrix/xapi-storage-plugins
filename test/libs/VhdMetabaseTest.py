@@ -261,3 +261,25 @@ class VhdMetabaseTest(unittest.TestCase):
         vdis = self.subject.find_leaf_coalesceable()
 
         self.assertEquals(1, len(vdis))
+
+    def test_get_vdi_for_vhd_no_vdi_none(self):
+        self.subject.populate_test_set_1()
+
+        vdi = self.subject.get_vdi_for_vhd(2222)
+
+        self.assertEquals(None, vdi)
+
+    def test_get_vdi_for_vhd_invalid_vhd_none(self):
+        self.subject.populate_test_set_1()
+
+        vdi = self.subject.get_vdi_for_vhd(1000)
+
+        self.assertEquals(None, vdi)
+
+    def test_get_vdi_for_vhd_success(self):
+        self.subject.populate_test_set_1()
+
+        vdi = self.subject.get_vdi_for_vhd(1)
+
+        self.assertEquals("VDI1", vdi.name)
+        self.assertEquals("1", vdi.uuid)

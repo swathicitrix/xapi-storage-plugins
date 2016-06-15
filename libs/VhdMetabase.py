@@ -85,6 +85,9 @@ class VhdMetabase(object):
                     FOREIGN KEY(vhd_id) REFERENCES vhd(id)
                 )"""
             )
+            self._conn.execute(
+                "CREATE INDEX vdi_vhd_id ON vdi(vhd_id)"
+            )
 
     def insert_vdi(self, name, description, uuid, vhd_id):
         res = self._conn.execute("""
@@ -178,6 +181,21 @@ class VhdMetabase(object):
             {"uuid" : vdi_uuid}
         )
 
+        row = res.fetchone()
+        if (row):
+            return VDI.from_row(row)
+
+        return None
+
+    def get_vdi_for_vhd(self, vhd_id):
+        res = self._conn.execute("""
+            SELECT *
+             FROM vdi
+                  INNER JOIN vhd
+                          ON vdi.vhd_id = vhd.id
+            WHERE vdi.vhd_id = :vhd_id""",
+                                 {"vhd_id": vhd_id}
+        )
         row = res.fetchone()
         if (row):
             return VDI.from_row(row)
