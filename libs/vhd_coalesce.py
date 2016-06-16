@@ -51,7 +51,7 @@ def find_leaves(vhd, db, leaf_accumulator):
         leaf_accumulator.append(db.get_vdi_for_vhd(vhd.id))
     else:
         for child in children:
-            find_leaves(child.id, db, leaf_accumulator)
+            find_leaves(child, db, leaf_accumulator)
 
 def find_root_node(key, db):
     if key.parent_id == None:
@@ -63,13 +63,13 @@ def find_root_node(key, db):
 
 def tap_ctl_pause(node, cb, opq):
     if node.active_on:
-        node_path = cb.volumeGetPath(opq, node.vhd.id)
+        node_path = cb.volumeGetPath(opq, str(node.vhd.id))
         log.debug("VHD %s active on %s" % (node.vhd.id, node.active_on))
         xapi.storage.libs.poolhelper.suspend_datapath_on_host("GC", node.active_on, node_path)
 
 def tap_ctl_unpause(node, cb, opq):
     if node.active_on:
-        node_path = cb.volumeGetPath(opq, node.vhd.id)
+        node_path = cb.volumeGetPath(opq, str(node.vhd.id))
         log.debug("VHD %s active on %s" % (node.vhd.id, node.active_on))
         xapi.storage.libs.poolhelper.resume_datapath_on_host("GC", node.active_on, node_path)
 
@@ -105,8 +105,8 @@ def non_leaf_coalesce(node, parent, uri, cb):
     opq = cb.volumeStartOperations(uri, 'w')
     meta_path = cb.volumeMetadataGetPath(opq)
 
-    node_path = cb.volumeGetPath(opq, node.id)
-    parent_path = cb.volumeGetPath(opq, parent.id)
+    node_path = cb.volumeGetPath(opq, str(node.id))
+    parent_path = cb.volumeGetPath(opq, str(parent.id))
 
     log.debug("Running vhd-coalesce on %s" % node.id)
     cmd = ["/usr/bin/vhd-util", "coalesce", "-n", node_path]
@@ -118,7 +118,7 @@ def non_leaf_coalesce(node, parent, uri, cb):
         children = db.get_children(node.id)
         # log.debug("List of children: %s" % children)
         for child in children:
-            child_path = cb.volumeGetPath(opq, child.id)
+            child_path = cb.volumeGetPath(opq, str(child.id))
 
             # pause all leaves having child as an ancestor
             leaves = []
@@ -146,7 +146,7 @@ def non_leaf_coalesce(node, parent, uri, cb):
 
         # remove key
         log.debug("Destroy %s" % node.id)
-        cb.volumeDestroy(opq, node.id)
+        cb.volumeDestroy(opq, str(node.id))
         with db.write_context():
             db.delete_vdi(node.id)
 
