@@ -200,15 +200,10 @@ def find_best_non_leaf_coalesceable_2(uri, cb):
     db = VhdMetabase.VhdMetabase(meta_path)
     ret = (None, None)
     with libvhd.Lock(opq, "gl", cb):
-        print "In coalesceable"
         nodes = find_non_leaf_coalesceable(db)
-        print "Nodes are {}".format(nodes)
         for node in nodes:
-            #log.debug row
-            print "node gc_status is '{}'".format(node.gc_status)
             if not node.gc_status:
                 root_node = find_root_node(node, db)
-                print "root gc is '{}'".format(root_node.gc_status)
                 if not root_node.gc_status:
                     with db.write_context():
                         db.update_vhd_gc_status(node.id, "Coalescing")
