@@ -405,12 +405,10 @@ def epcclose(dbg, uri, cb):
     return None
 
 def startGC(dbg, sr_name, uri):
-    return
     import vhd_coalesce
     vhd_coalesce.startGC(dbg, sr_name, uri)
 
 def stopGC(dbg, sr_name, uri):
-    return
     import vhd_coalesce
     vhd_coalesce.stopGC(dbg, sr_name, uri)
 
