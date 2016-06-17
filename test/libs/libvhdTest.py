@@ -21,7 +21,7 @@ class LibVhdTest(unittest.TestCase):
 
     @mock.patch('libvhd.VhdMetabase.VhdMetabase')
     @mock.patch('libvhd.vhdutil')
-    @mock.patch('libvhd.xapi.storage.libs.poolhelper')
+    @mock.patch('libvhd.poolhelper')
     def test_clone_refresh_datapath_success(self, poolhelper, mockVhdUtil, mockDatabase):
         callbacks = mock.MagicMock()
 
@@ -77,7 +77,7 @@ class LibVhdTest(unittest.TestCase):
 
     @mock.patch('libvhd.VhdMetabase.VhdMetabase')
     @mock.patch('libvhd.vhdutil')
-    @mock.patch('libvhd.xapi.storage.libs.poolhelper')
+    @mock.patch('libvhd.poolhelper')
     def test_clone_not_active_success(self, poolhelper, mockVhdUtil, mockDatabase):
         callbacks = mock.MagicMock()
 
@@ -133,7 +133,7 @@ class LibVhdTest(unittest.TestCase):
 
     @mock.patch('libvhd.VhdMetabase.VhdMetabase')
     @mock.patch('libvhd.vhdutil')
-    @mock.patch('libvhd.xapi.storage.libs.poolhelper')
+    @mock.patch('libvhd.poolhelper')
     def test_clone_single_success(self, poolhelper, mockVhdUtil, mockDatabase):
         callbacks = mock.MagicMock()
 
