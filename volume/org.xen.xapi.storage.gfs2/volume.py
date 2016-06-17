@@ -4,43 +4,59 @@ import os
 import sys
 import xapi.storage.api.volume
 from xapi.storage import log
-from xapi.storage.libs import libvhd
+from xapi.storage.libs.libvhd import VHDVolume
 import gfs2
 
 class Implementation(xapi.storage.api.volume.Volume_skeleton):
 
     def clone(self, dbg, sr, key):
-        return libvhd.clone(dbg, sr, key, gfs2.Callbacks())
+        return VHDVolume.clone(dbg, sr, key, gfs2.Callbacks())
 
     def snapshot(self, dbg, sr, key):
-        return libvhd.clone(dbg, sr, key, gfs2.Callbacks())
+        return VHDVolume.clone(dbg, sr, key, gfs2.Callbacks())
 
     def create(self, dbg, sr, name, description, size):
-        return libvhd.create(dbg, sr, name, description, size, 
-                             gfs2.Callbacks())
+        return VHDVolume.create(
+            dbg,
+            sr,
+            name,
+            description,
+            size,
+            gfs2.Callbacks()
+        )
 
     def destroy(self, dbg, sr, key):
-        return libvhd.destroy(dbg, sr, key, gfs2.Callbacks())
+        return VHDVolume.destroy(dbg, sr, key, gfs2.Callbacks())
 
     def resize(self, dbg, sr, key, new_size):
-        return libvhd.resize(dbg, sr, key, new_size, 
-                             gfs2.Callbacks())
+        return VHDVolume.resize(
+            dbg,
+            sr,
+            key,
+            new_size,
+            gfs2.Callbacks()
+        )
 
     def set(self, dbg, sr, key, k, v):
-        libvhd.set(dbg, sr, key, k, v, gfs2.Callbacks())
+        VHDVolume.set(dbg, sr, key, k, v, gfs2.Callbacks())
 
     def unset(self, dbg, sr, key, k):
-        libvhd.unset(dbg, sr, key, k, gfs2.Callbacks())
+        VHDVolume.unset(dbg, sr, key, k, gfs2.Callbacks())
 
     def set_description(self, dbg, sr, key, new_description):
-        libvhd.set_description(dbg, sr, key, new_description,
-                               gfs2.Callbacks())
+        VHDVolume.set_description(
+            dbg,
+            sr,
+            key,
+            new_description,
+            gfs2.Callbacks()
+        )
 
     def set_name(self, dbg, sr, key, new_name):
-        libvhd.set_name(dbg, sr, key, new_name, gfs2.Callbacks())
+        VHDVolume.set_name(dbg, sr, key, new_name, gfs2.Callbacks())
 
     def stat(self, dbg, sr, key):
-        return libvhd.stat(dbg, sr, key, gfs2.Callbacks())
+        return VHDVolume.stat(dbg, sr, key, gfs2.Callbacks())
 
 if __name__ == "__main__":
     log.log_call_argv()

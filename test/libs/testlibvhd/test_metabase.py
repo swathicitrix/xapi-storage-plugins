@@ -1,11 +1,11 @@
 import unittest
 import uuid
-import VhdMetabase
+import libvhd.metabase
 
-class StubVhdMetabase(VhdMetabase.VhdMetabase):
+class StubVHDMetabase(libvhd.metabase.VHDMetabase):
 
     def __init__(self):
-        VhdMetabase.VhdMetabase.__init__(self, ":memory:")
+        libvhd.metabase.VHDMetabase.__init__(self, ":memory:")
 
     def schema_check(self):
         with self._conn:
@@ -51,10 +51,10 @@ class StubVhdMetabase(VhdMetabase.VhdMetabase):
             self.insert_vdi("Snap2", "Second Snapshot", str(3), vhd5.id)
             self.insert_vdi("Snap3", "Third Snapshot", str(4), vhd7.id)
 
-class VhdMetabaseTest(unittest.TestCase):
+class VHDMetabaseTest(unittest.TestCase):
 
     def setUp(self):
-        self.subject = StubVhdMetabase()
+        self.subject = StubVHDMetabase()
         self.subject.create()
 
     def tearDown(self):

@@ -7,7 +7,7 @@ import xapi
 import xapi.storage.api.datapath
 import xapi.storage.api.volume
 import importlib
-from xapi.storage.libs import libvhd
+from xapi.storage.libs.libvhd import VHDDatapath
 from xapi.storage import log
 
 
@@ -22,28 +22,28 @@ class Implementation(xapi.storage.api.datapath.Datapath_skeleton):
 
     def activate(self, dbg, uri, domain):
         cb = get_sr_callbacks(dbg, uri)
-        libvhd.activate(dbg, uri, domain, cb)
+        VHDDatapath.activate(dbg, uri, domain, cb)
 
     def attach(self, dbg, uri, domain):
         cb = get_sr_callbacks(dbg, uri)
-        return libvhd.attach(dbg, uri, domain, cb)
+        return VHDDatapath.attach(dbg, uri, domain, cb)
 
     def detach(self, dbg, uri, domain):
         cb = get_sr_callbacks(dbg, uri)
-        libvhd.detach(dbg, uri, domain, cb)
+        VHDDatapath.detach(dbg, uri, domain, cb)
 
     def deactivate(self, dbg, uri, domain):
         cb = get_sr_callbacks(dbg, uri)
-        libvhd.deactivate(dbg, uri, domain, cb)
+        VHDDatapath.deactivate(dbg, uri, domain, cb)
 
     def open(self, dbg, uri, persistent):
         cb = get_sr_callbacks(dbg, uri)
-        libvhd.epcopen(dbg, uri, persistent, cb)
+        VHDDatapath.epc_open(dbg, uri, persistent, cb)
         return None
 
     def close(self, dbg, uri):
         cb = get_sr_callbacks(dbg, uri)
-        libvhd.epcclose(dbg, uri, cb)
+        VHDDatapath.epc_close(dbg, uri, cb)
         return None
 
 if __name__ == "__main__":

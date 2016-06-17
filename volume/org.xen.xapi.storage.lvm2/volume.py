@@ -1,9 +1,11 @@
 #!/usr/bin/env python
 
-import urlparse
 import os
 import sys
 import xapi.storage.api.volume
+
+from xapi.storage import log
+from xapi.storage.libs.libvhd import VHDVolume
 
 class gfs2BaseCallbacks(libvhd.BaseCallbacks):
     def volumeCreate(sr, name, size):
@@ -30,41 +32,55 @@ class gfs2BaseCallbacks(libvhd.BaseCallbacks):
 class Implementation(xapi.storage.api.volume.Volume_skeleton):
 
     def clone(self, dbg, sr, key):
-        return libvhd.clone(dbg, sr, key, gfs2BaseCallbacks)
+        return VHDVolume.clone(dbg, sr, key, gfs2BaseCallbacks)
 
     def snapshot(self, dbg, sr, key):
-        return libvhd.snapshot(dbg, sr, key, gfs2BaseCallbacks)
+        return VHDVolume.snapshot(dbg, sr, key, gfs2BaseCallbacks)
 
     def create(self, dbg, sr, name, description, size):
-        return libvhd.create(dbg, sr, name, description, size, 
-                             gfs2BaseCallbacks)
+        return VHDVolume.create(
+            dbg,
+            sr,
+            name,
+            description,
+            size,
+            gfs2BaseCallbacks
+        )
 
     def destroy(self, dbg, sr, key):
-        return libvhd.destroy(dbg, sr, key, gfs2BaseCallbacks)
+        return VHDVolume.destroy(dbg, sr, key, gfs2BaseCallbacks)
 
     def resize(self, dbg, sr, key, new_size):
-        return libvhd.destroy(dbg, sr, key, new_size, 
-                              gfs2BaseCallbacks)
+        return VHDVolume.destroy(
+            dbg,
+            sr,
+            key,
+            new_size,
+            gfs2BaseCallbacks
+        )
 
     def set(self, dbg, sr, key, k, v):
-        libvhd.set(key, k, v, gfs2BaseCallbacks)
+        VHDVolume.set(key, k, v, gfs2BaseCallbacks)
         return None
 
     def unset(self, dbg, sr, key, k):
-        libvhd.unset(key, k, gfs2BaseCallbacks)
+        VHDVolume.unset(key, k, gfs2BaseCallbacks)
         return None
 
     def set_description(self, dbg, sr, key, new_description):
-        libvhd.set_description(key, new_description,
-                                           gfs2BaseCallbacks)
+        VHDVolume.set_description(
+            key,
+            new_description,
+            gfs2BaseCallbacks
+        )
         return None
 
     def set_name(self, dbg, sr, key, new_name):
-        libvhd.set_name(key, new_name, gfs2BaseCallbacks)
+        VHDVolume.set_name(key, new_name, gfs2BaseCallbacks)
         return None
 
     def stat(self, dbg, sr, key):
-        return libvhd.stat(key, gfs2BaseCallbacks)
+        return VHDVolume.stat(key, gfs2BaseCallbacks)
 
 if __name__ == "__main__":
     log.log_call_argv()

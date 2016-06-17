@@ -1,15 +1,24 @@
 #!/usr/bin/env python
 
+from __future__ import absolute_import
+import subprocess
 import importlib
 import os
 import sys
 import time
-from xapi.storage.libs import log
-from xapi.storage.libs import libvhd
-from xapi.storage.libs import util
-import xapi.storage.libs.poolhelper
-from xapi.storage.libs import VhdMetabase
+import errno
 
+from xapi.storage.libs import log
+from xapi.storage.libs import poolhelper
+
+from .vhdutil import VHDUtil
+from .metabase import VHDMetabase
+from .lock import Lock
+
+# Debug string
+GC = 'GC'
+
+# See also: http://stackoverflow.com/a/1160227
 def touch(filename):
     if not os.path.exists(os.path.dirname(filename)):
         try:
@@ -27,14 +36,17 @@ def touch(filename):
             raise
 
 def get_sr_callbacks(sr_type):
-    sys.path.insert(0, '/usr/libexec/xapi-storage-script/volume/org.xen.xapi.storage.' + sr_type)
+    sys.path.insert(
+        1,
+        '/usr/libexec/xapi-storage-script/volume/org.xen.xapi.storage.' + sr_type
+    )
     mod = importlib.import_module(sr_type)
     return mod.Callbacks()
 
 def find_non_leaf_coalesceable(db):
     results = db.find_non_leaf_coalesceable()
     if len(results) > 0:
-        log.debug("Found %s non leaf coalescable nodes" % len(results))
+        log.debug("Found {} non leaf coalescable nodes".format(len(results)))
     return results
 
 #def find_leaf_coalesceable(db):
@@ -55,7 +67,7 @@ def find_leaves(vhd, db, leaf_accumulator):
 
 def find_root_node(key, db):
     if key.parent_id == None:
-        log.debug("Found root node %s" % key)
+        log.debug("Found root node {}".format(key))
         return key
     else:
         parent = db.get_vhd_by_id(key.parent_id)
@@ -64,14 +76,14 @@ def find_root_node(key, db):
 def tap_ctl_pause(node, cb, opq):
     if node.active_on:
         node_path = cb.volumeGetPath(opq, str(node.vhd.id))
-        log.debug("VHD %s active on %s" % (node.vhd.id, node.active_on))
-        xapi.storage.libs.poolhelper.suspend_datapath_on_host("GC", node.active_on, node_path)
+        log.debug("VHD {} active on {}".format(node.vhd.id, node.active_on))
+        poolhelper.suspend_datapath_on_host(GC, node.active_on, node_path)
 
 def tap_ctl_unpause(node, cb, opq):
     if node.active_on:
         node_path = cb.volumeGetPath(opq, str(node.vhd.id))
-        log.debug("VHD %s active on %s" % (node.vhd.id, node.active_on))
-        xapi.storage.libs.poolhelper.resume_datapath_on_host("GC", node.active_on, node_path)
+        log.debug("VHD {} active on {}".format(node.vhd.id, node.active_on))
+        poolhelper.resume_datapath_on_host(GC, node.active_on, node_path)
 
 # def leaf_coalesce_snapshot(key, conn, cb, opq):
 #     log.debug("leaf_coalesce_snapshot key=%s" % key)
@@ -80,7 +92,7 @@ def tap_ctl_unpause(node, cb, opq):
 #     res = conn.execute("select name,parent,description,uuid,vsize from VDI where rowid = (?)",
 #                        (int(key),)).fetchall()
 #     (p_name, p_parent, p_desc, p_uuid, p_vsize) = res[0]
-    
+
 #     tap_ctl_pause(key, conn, cb, opq)
 #     res = conn.execute("insert into VDI(snap, parent) values (?, ?)",
 #                        (0, p_parent))
@@ -91,7 +103,7 @@ def tap_ctl_unpause(node, cb, opq):
 #     cmd = ["/usr/bin/vhd-util", "snapshot",
 #            "-n", key_path, "-p", base_path]
 #     output = call("GC", cmd)
-        
+
 #     res = conn.execute("update VDI set parent = (?) where rowid = (?)",
 #                            (int(base_name), int(key),) )
 #     conn.commit()
@@ -99,7 +111,7 @@ def tap_ctl_unpause(node, cb, opq):
 #     tap_ctl_unpause(key, conn, cb, opq)
 
 def non_leaf_coalesce(node, parent, uri, cb):
-    log.debug ("non_leaf_coalesce key=%s, parent=%s" % (node.id, parent.id))
+    log.debug("non_leaf_coalesce key={}, parent={}".format(node.id, parent.id))
     #conn.execute("node is coalescing")
 
     opq = cb.volumeStartOperations(uri, 'w')
@@ -108,14 +120,14 @@ def non_leaf_coalesce(node, parent, uri, cb):
     node_path = cb.volumeGetPath(opq, str(node.id))
     parent_path = cb.volumeGetPath(opq, str(parent.id))
 
-    log.debug("Running vhd-coalesce on %s" % node.id)
-    cmd = ["/usr/bin/vhd-util", "coalesce", "-n", node_path]
-    util.call("GC", cmd)
+    log.debug("Running vhd-coalesce on {}".format(node.id))
+    VHDUtil.coalesce(GC, node_path)
 
-    db = VhdMetabase.VhdMetabase(meta_path)
-    with libvhd.Lock(opq, "gl", cb):
+    db = VHDMetabase(meta_path)
+    with Lock(opq, "gl", cb):
         # reparent all of the children to this node's parent
         children = db.get_children(node.id)
+
         # log.debug("List of children: %s" % children)
         for child in children:
             child_path = cb.volumeGetPath(opq, str(child.id))
@@ -123,29 +135,33 @@ def non_leaf_coalesce(node, parent, uri, cb):
             # pause all leaves having child as an ancestor
             leaves = []
             find_leaves(child, db, leaves)
-            log.debug("Children of {}: pausing all leaves: {}".format(child.id, len(leaves)))
+            log.debug(
+                ("Children of {}: pausing all "
+                 "leaves: {}").format(child.id, len(leaves))
+            )
             for leaf in leaves:
                 tap_ctl_pause(leaf, cb, opq)
 
             # reparent child to grandparent
-            log.debug("Reparenting %s to %s" % (child.id, parent.id))
+            log.debug("Reparenting {} to {}".format(child.id, parent.id))
             with db.write_context():
                 db.update_vhd_parent(child.id, parent.id)
-                cmd = ["/usr/bin/vhd-util", "modify", "-n", child_path, "-p", parent_path]
-                util.call("GC", cmd)
+                VHDUtil.set_parent(GC, child_path, parent_path)
 
             # unpause all leaves having child as an ancestor
-            log.debug("Children %s: unpausing all leaves: %s" % (child.id, leaves))
+            log.debug(
+                ("Children {}: unpausing all "
+                 "leaves: {}").format(child.id, leaves))
             for leaf in leaves:
                 tap_ctl_unpause(leaf, cb, opq)
 
         root_node = find_root_node(parent, db)
-        log.debug("Setting gc_status to None root node %s" % root_node)
+        log.debug("Setting gc_status to None root node {}".format(root_node))
         with db.write_context():
             db.update_vhd_gc_status(root_node.id, None)
 
         # remove key
-        log.debug("Destroy %s" % node.id)
+        log.debug("Destroy {}".format(node.id))
         cb.volumeDestroy(opq, str(node.id))
         with db.write_context():
             db.delete_vdi(node.id)
@@ -166,7 +182,7 @@ def non_leaf_coalesce(node, parent, uri, cb):
 #         p_parent = int(p_parent)
 #     else:
 #         p_parent = "?"
-    
+
 
 #     tap_ctl_pause(key, conn, cb, opq)
 
@@ -197,17 +213,18 @@ def non_leaf_coalesce(node, parent, uri, cb):
 def find_best_non_leaf_coalesceable_2(uri, cb):
     opq = cb.volumeStartOperations(uri, 'w')
     meta_path = cb.volumeMetadataGetPath(opq)
-    db = VhdMetabase.VhdMetabase(meta_path)
+    db = VHDMetabase(meta_path)
+
     ret = (None, None)
-    with libvhd.Lock(opq, "gl", cb):
+    with Lock(opq, 'gl', cb):
         nodes = find_non_leaf_coalesceable(db)
         for node in nodes:
             if not node.gc_status:
                 root_node = find_root_node(node, db)
                 if not root_node.gc_status:
                     with db.write_context():
-                        db.update_vhd_gc_status(node.id, "Coalescing")
-                        db.update_vhd_gc_status(root_node.id, "Coalescing")
+                        db.update_vhd_gc_status(node.id, 'Coalescing')
+                        db.update_vhd_gc_status(root_node.id, 'Coalescing')
                     ret = (node, db.get_vhd_by_id(node.parent_id))
                     break
     db.close()
@@ -219,7 +236,7 @@ def daemonize():
         try:
             os.close(fd)
         except OSError:
-            pass    
+            pass
 
 def run_coalesce(sr_type, uri):
     daemonize()
@@ -227,7 +244,7 @@ def run_coalesce(sr_type, uri):
     cb = get_sr_callbacks(sr_type)
     #get_all_nodes(conn)
     opq = cb.volumeStartOperations(uri, 'w')
-    
+
     gc_running = os.path.join("/var/run/sr-private",
                               cb.getUniqueIdentifier(opq),
                               "gc-running")
@@ -255,31 +272,40 @@ def run_coalesce(sr_type, uri):
 
     #conn.close()
 
-def startGC(dbg, sr_type, uri):
-    import subprocess
-    args = ['/usr/lib/python2.7/site-packages/xapi/storage/libs/vhd_coalesce.py', sr_type, uri]
-    subprocess.Popen(args)
-    log.debug("%s: Started GC sr_type=%s uri=%s" % (dbg, sr_type, uri))
+class VHDCoalesce(object):
+    @staticmethod
+    def start_gc(dbg, sr_type, uri):
+        args = [os.path.abspath(__file__), sr_type, uri]
+        subprocess.Popen(args)
+        log.debug("{}: Started GC sr_type={} uri={}".format(dbg, sr_type, uri))
 
-def stopGC(dbg, sr_type, uri):
-    cb = get_sr_callbacks(sr_type)
-    opq = cb.volumeStartOperations(uri, 'w')
-    gc_running = os.path.join("/var/run/sr-private",
-                              cb.getUniqueIdentifier(opq),
-                              "gc-running")
-    gc_exited = os.path.join("/var/run/sr-private",
-                             cb.getUniqueIdentifier(opq),
-                             "gc-exited")
-    os.unlink(gc_running)
+    @staticmethod
+    def stop_gc(dbg, sr_type, uri):
+        cb = get_sr_callbacks(sr_type)
+        opq = cb.volumeStartOperations(uri, 'w')
 
-    while True:
-        if (os.path.exists(gc_exited)):
-            os.unlink(gc_exited)
-            return
-        else:
-            time.sleep(1)
+        gc_running = os.path.join(
+            '/var/run/sr-private',
+            cb.getUniqueIdentifier(opq),
+            'gc-running'
+        )
 
-if __name__ == "__main__":
+        gc_exited = os.path.join(
+            "/var/run/sr-private",
+            cb.getUniqueIdentifier(opq),
+            'gc-exited'
+        )
+
+        os.unlink(gc_running)
+
+        while True:
+            if os.path.exists(gc_exited):
+                os.unlink(gc_exited)
+                return
+            else:
+                time.sleep(1)
+
+if __name__ == '__main__':
     sr_type = sys.argv[1]
     uri = sys.argv[2]
     run_coalesce(sr_type, uri)

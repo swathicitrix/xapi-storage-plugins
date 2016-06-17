@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-
 import sqlite3
 from contextlib import contextmanager
 
@@ -21,10 +19,11 @@ class VDI(object):
             row['description'],
             row['active_on'],
             row['nonpersistent'],
-            vhd)
+            vhd
+        )
 
 class VHD(object):
-    def __init__(self, vhd_id, parent, snap, vsize, psize, gc_status = None):
+    def __init__(self, vhd_id, parent, snap, vsize, psize, gc_status=None):
         self.id = vhd_id
         self.parent_id = parent
         self.snap = snap
@@ -49,14 +48,19 @@ class VHD(object):
             row['gc_status']
         )
 
-class VhdMetabase(object):
+class VHDMetabase(object):
 
     def __init__(self, path):
         self.__path = path
         self.__connect()
 
     def __connect(self):
-        self._conn = sqlite3.connect(self.__path, timeout=3600, isolation_level="DEFERRED")
+        self._conn = sqlite3.connect(
+            self.__path,
+            timeout=3600,
+            isolation_level='DEFERRED'
+        )
+
         self._conn.row_factory = sqlite3.Row
 
     def create(self):
@@ -161,7 +165,7 @@ class VhdMetabase(object):
 
     def __insert_vhd(self, parent, snap, vsize, psize):
         res = self._conn.execute(
-            "INSERT INTO vhd(parent_id, snap, vsize, psize) " 
+            "INSERT INTO vhd(parent_id, snap, vsize, psize) "
             "VALUES (:parent, :snap, :vsize, :psize)",
             {"parent": parent,
              "snap": snap,
@@ -256,17 +260,17 @@ class VhdMetabase(object):
 
     def find_non_leaf_coalesceable(self):
         res = self._conn.execute("""
-            SELECT * FROM 
-                   (SELECT *, COUNT(id) as num 
-                      FROM VHD
-                     WHERE parent_id NOT NULL 
+            SELECT * FROM
+                   (SELECT *, COUNT(id) AS num
+                      FROM vhd
+                     WHERE parent_id NOT NULL
                   GROUP BY parent_id
-            ) as node
-             WHERE node.num = 1 
-               AND node.id IN 
+            ) AS node
+             WHERE node.num = 1
+               AND node.id IN
                    (SELECT parent_id
-                      FROM VHD
-                     WHERE parent_id NOT NULL 
+                      FROM vhd
+                     WHERE parent_id NOT NULL
                   GROUP BY parent_id)""")
         vhds = []
         for row in res:
@@ -275,17 +279,17 @@ class VhdMetabase(object):
 
     def find_leaf_coalesceable(self):
         res = self._conn.execute("""
-            SELECT * FROM 
-                   (SELECT *, COUNT(id) as num 
-                      FROM VHD
-                     WHERE parent_id NOT NULL 
+            SELECT * FROM
+                   (SELECT *, COUNT(id) AS num
+                      FROM vhd
+                     WHERE parent_id NOT NULL
                   GROUP BY parent_id
-            ) as node
-             WHERE node.num = 1 
-               AND node.id NOT IN 
+            ) AS node
+             WHERE node.num = 1
+               AND node.id NOT IN
                    (SELECT parent_id
-                      FROM VHD
-                     WHERE parent_id NOT NULL 
+                      FROM vhd
+                     WHERE parent_id NOT NULL
                   GROUP BY parent_id)""")
         vhds = []
         for row in res:

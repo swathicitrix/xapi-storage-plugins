@@ -7,17 +7,17 @@ import sys
 import errno
 import uuid
 import urlparse
-import xapi.storage.api.volume
-from xapi.storage.common import call
-from xapi.storage.libs import libvhd
-from xapi.storage.libs import libiscsi
-from xapi.storage.libs import blkinfo
-from xapi.storage import log
-import fcntl
 import json
 import xcp.environ
-import XenAPI
+
+import xapi.storage.api.volume
+from xapi.storage.common import call
+from xapi.storage.libs.libvhd import VHDVolume, VHDCoalesce
+from xapi.storage.libs import libiscsi
+from xapi.storage.libs import blkinfo
 from xapi.storage.libs import util
+from xapi.storage import log
+import XenAPI
 
 import gfs2
 import fence_tool
@@ -354,7 +354,7 @@ class Implementation(xapi.storage.api.volume.SR_skeleton):
         sr = "file://" + mnt_path
 
         # Start GC for this host
-        #libvhd.startGC(dbg, "gfs2", sr)
+        # VHDCoalesce.start_gc(dbg, "gfs2", sr)
 
         return sr
 
@@ -425,7 +425,7 @@ class Implementation(xapi.storage.api.volume.SR_skeleton):
         mnt_path = mount_local(dbg, gfs2_dev_path)
 
         # Create the metadata database
-        libvhd.create_metabase(mnt_path + "/sqlite3-metadata.db")
+        VHDVolume.create_metabase(mnt_path + "/sqlite3-metadata.db")
 
         read_caching = True
         if 'read_caching' in configuration:
@@ -472,7 +472,7 @@ class Implementation(xapi.storage.api.volume.SR_skeleton):
         # stop GC
         try:
             pass
-            #libvhd.stopGC(dbg, "gfs2", sr)
+            # VHDCoalesce.stop_gc(dbg, "gfs2", sr)
         except:
             log.debug("GC already stopped")
 
@@ -514,7 +514,7 @@ class Implementation(xapi.storage.api.volume.SR_skeleton):
         unplug_device(dbg, uri)
 
     def ls(self, dbg, sr):
-        return libvhd.ls(dbg, sr, gfs2.Callbacks())
+        return VHDVolume.ls(dbg, sr, gfs2.Callbacks())
 
     def stat(self, dbg, sr):
         # SR path (sr) is file://<mnt_path>
@@ -532,7 +532,7 @@ class Implementation(xapi.storage.api.volume.SR_skeleton):
         log.debug("%s: statvfs says psize = %Ld" % (dbg, psize))
 
         overprovision = \
-             libvhd.get_sr_provisioned_size(sr, gfs2.Callbacks()) / psize
+             VHDVolume.get_sr_provisioned_size(sr, gfs2.Callbacks()) / psize
 
         return {
             "sr": sr,

@@ -1,12 +1,14 @@
 #!/usr/bin/env python
 
 from __future__ import division
+from time import sleep
+import errno
+
 from xapi.storage.libs.rrddlib import Datasource, PluginControl
-from xapi.storage.libs.libvhd import Lock
+from xapi.storage.libs.libvhdi.lock import Lock
 from xapi.storage.libs.vhd_coalesce import touch
 from sr import Implementation
 from xapi.storage import log
-from time import sleep
 
 def force_unlink(path):
     from os import unlink

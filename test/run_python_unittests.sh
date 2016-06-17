@@ -24,8 +24,8 @@ set -u
 (
     cd "$PLUGINROOT"
 
-    LIBDIRS=`find $PLUGINROOT/libs -maxdepth 1 -type d | tr '\n' ' '`
-    LIBTESTS=`find $PLUGINROOT/test/libs -name \*Test.py`
+    LIBDIRS="$PLUGINROOT/libs"
+    LIBTESTS=`find $PLUGINROOT/test/libs -name test_\*.py`
 
     # Run pylint over the code under test first
     #pylint $SOURCE
@@ -45,6 +45,7 @@ set -u
     )
 
     # Test the libs
+    echo $LIBDIRS
     PYTHONPATH="`echo "$LIBDIRS" | tr ' ' ':'`" \
     coverage run --branch $(which nosetests) \
         --with-xunit                \
