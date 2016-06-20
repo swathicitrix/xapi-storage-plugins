@@ -361,14 +361,11 @@ class Implementation(xapi.storage.api.volume.SR_skeleton):
     def create(self, dbg, uri, name, description, configuration):
         log.debug("%s: SR.create: uri=%s, config=%s" % (dbg, uri, configuration))
 
-        # Fetch the pool uuid to use as cluster id
-        session = XenAPI.xapi_local()
-        session.xenapi.login_with_password("root", "")
-        pool = session.xenapi.pool.get_all()[0]
-        pool_uuid = session.xenapi.pool.get_uuid(pool)
-
+        cmd = ["/usr/sbin/corosync-cmapctl", "totem.cluster_name"]
+        out = call(dbg, cmd).rstrip()
         # Cluster id is quite limited in size
-        cluster_name = pool_uuid[:8]
+        cluster_name = out.split("=")[1][1:9]
+
         # Generate a UUID for the filesystem name
         # According to mkfs.gfs2 manpage, SR name can only be 1--16 chars in length
         sr_name = str(uuid.uuid4())[0:16]
