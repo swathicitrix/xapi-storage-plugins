@@ -1,6 +1,4 @@
-from xapi.storage.libs import log
-import XenAPI
-
+from xapi.storage.libs.log import Log
 
 def get_online_host_refs(dbg, session):
     # This function is borrowed from xapi-project/sm.git/util.py
@@ -15,6 +13,7 @@ def get_online_host_refs(dbg, session):
 
 
 def call_plugin_in_pool(dbg, plugin_name, plugin_function, args):
+    import XenAPI
     log.debug("%s: calling plugin '%s' function '%s' with args %s in pool" % (dbg, plugin_name, plugin_function, args))
     session = XenAPI.xapi_local()
     try:
@@ -45,6 +44,7 @@ def call_plugin_in_pool(dbg, plugin_name, plugin_function, args):
 
 
 def call_plugin_on_host(dbg, host_name, plugin_name, plugin_function, args):
+    import XenAPI
     log.debug("%s: calling plugin '%s' function '%s' with args %s on %s" % (dbg, plugin_name, plugin_function, args, host_name))
     session = XenAPI.xapi_local()
     try:

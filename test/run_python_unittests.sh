@@ -6,6 +6,8 @@ PLUGINROOT=$(cd $(dirname $0) && cd .. && pwd)
 ENVDIR="$PLUGINROOT/.env"
 TESTROOT="$PLUGINROOT/test"
 
+echo "Running unit tests from $PLUGINROOT"
+
 function finish {
     (
         cd "$PLUGINROOT"/libs
@@ -17,18 +19,29 @@ function finish {
 
 trap finish EXIT
 
-set +u
-. "$ENVDIR/bin/activate"
-set -u
+if [ -z "${CHROOT-default}" ]; then
+    if [ ! -d $ENVDIR ]; then
+        $(dirname $0)/setup_env_for_python_unittests.sh
+    fi
+
+    set +u
+    . "$ENVDIR/bin/activate"
+    set -u
+fi
 
 (
     cd "$PLUGINROOT"
 
     LIBDIRS="$PLUGINROOT/libs"
-    LIBTESTS=`find $PLUGINROOT/test/libs -name test_\*.py`
+    DATAPATHDIRS=`find $PLUGINROOT/datapath -maxdepth 1 -type d | tr '\n' ' '`
+    VOLUMEDIRS=`find $PLUGINROOT/volume -maxdepth 1 -type d  | tr '\n' ' '`
+
+    SOURCEDIRS="$DATAPATHDIRS $VOLUMEDIRS $LIBDIRS $TESTROOT"
+
+    SOURCE=`find $SOURCEDIRS -name \*.py | tr '\n' ','`
 
     # Run pylint over the code under test first
-    #pylint $SOURCE
+    pylint -E $SOURCE
 
     # clear the coverage
     coverage erase
@@ -45,7 +58,7 @@ set -u
     )
 
     # Test the libs
-    echo $LIBDIRS
+    LIBTESTS=`find $PLUGINROOT/test/libs -name test_\*.py`
     PYTHONPATH="`echo "$LIBDIRS" | tr ' ' ':'`" \
     coverage run --branch $(which nosetests) \
         --with-xunit                \
@@ -53,7 +66,6 @@ set -u
         $LIBTESTS
 
     # Test datapath plugins
-    DATAPATHDIRS=`find $PLUGINROOT/datapath -maxdepth 1 -type d | tr '\n' ' '`
     DATAPATHTESTROOT="$TESTROOT/datapath"
     for datapath in $DATAPATHDIRS; do
         LEAF=$(basename $datapath)
@@ -65,7 +77,6 @@ set -u
     done
 
     # Test volume plugins
-    VOLUMEDIRS=`find $PLUGINROOT/volume -maxdepth 1 -type d  | tr '\n' ' '`
     VOLUMETESTROOT="$TESTROOT/volume"
     for volume in $VOLUMEDIRS; do
         LEAF=$(basename $volume)
@@ -75,10 +86,6 @@ set -u
             echo "Found test folder for $LEAF"
         fi
     done
-
-    SOURCEDIRS="$DATAPATHDIRS $VOLUMEDIRS $LIBDIRS $TESTROOT"
-
-    SOURCE=`find $SOURCEDIRS -name \*.py | tr '\n' ','`
 
     coverage report --include="$SOURCE"
     coverage xml --include="$SOURCE"
