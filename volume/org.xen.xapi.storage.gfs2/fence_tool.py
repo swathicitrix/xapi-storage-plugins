@@ -72,14 +72,13 @@ def dlm_fence_daemon(node_id):
                 pass
             elif ret == MSG_FENCE:
                 log.debug("dlm_fence_daemon: MSG_FENCE")
-                log.debug("dlm_fence_daemon: Settingo WD timeout to 1 second")
+                log.debug("dlm_fence_daemon: Setting WD timeout to 1 second")
                 s = struct.pack ("i", 1)
                 fcntl.ioctl(wd, 3221509894 , s)
                 log.debug("dlm_fence_daemon: writing MSG_FENCE_ACK")
                 ret = block_write(bd, BLK_SIZE * ((2 * n) + 1), MSG_FENCE_ACK)
                 log.debug("dlm_fence_daemon: MSG_FENCE_ACK sent")
-                # force reboot here
-                return
+                # host will be fenced in 1 second
         d.close()
         util.unlock_file("SSSS", f)
         os.write(wd, "w")
@@ -113,6 +112,7 @@ def dlm_fence_node(node_id):
         d.close()
         util.unlock_file("dlm_fence_node", f)
         time.sleep(1)
+    log.debug("dlm_fence_node ACKING FENCE after TIMEOUT for node_id=%d" % n)
 
 def dlm_fence_clear_by_id(node_id, scsi_id):
     n = int(node_id)

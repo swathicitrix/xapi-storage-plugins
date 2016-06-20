@@ -1,3 +1,8 @@
 #!/bin/bash
 
 logger ha_set_pool_state $@
+
+dir=$(dirname $(readlink -f $0))
+
+# Set pool state for this host
+$dir/set_pool_state.py $@

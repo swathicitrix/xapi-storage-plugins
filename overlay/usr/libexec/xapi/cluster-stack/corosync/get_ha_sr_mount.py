@@ -1,4 +1,4 @@
-#!/bin/python
+#!/usr/bin/python
 
 import sys
 import os
@@ -9,4 +9,5 @@ def get_sr_mount():
         volume_uri = fd.read()
         return str(urlparse.urlparse(volume_uri).path.split("|")[0])
 
-print get_sr_mount()
+if __name__ == '__main__':
+    print get_sr_mount()

@@ -1,4 +1,4 @@
-#!/bin/python
+#!/usr/bin/python
 
 import os
 import subprocess
@@ -12,44 +12,48 @@ def call(cmd_args):
     stdout, stderr = p.communicate()
     return stdout.rstrip()
 
-sr_mount = get_ha_sr_mount.get_sr_mount()
-nodeids = os.listdir(sr_mount + "/.ha/host/")
-dlm_output = call(["dlm_tool", "status"])
-dlm_output_lines = dlm_output.splitlines()
+try:
+    sr_mount = get_ha_sr_mount.get_sr_mount()
+    nodeids = os.listdir(sr_mount + "/.ha/host/")
+    dlm_output = call(["dlm_tool", "status"])
+    dlm_output_lines = dlm_output.splitlines()
 
-liveness = {}
-ismaster = {}
-uuid = {}
-liveset = ""
+    liveness = {}
+    ismaster = {}
+    uuid = {}
+    liveset = ""
 
-with open(sr_mount + "/.ha/master/state.json", "r") as fd:
-    meta = json.load(fd)
-    master = meta["master"]
+    with open(sr_mount + "/.ha/master/state.json", "r") as fd:
+        meta = json.load(fd)
+        master = meta["master"]
 
-with open("/etc/xensource-inventory", "r") as fd:
-    lines = fd.readlines()
-    for line in lines:
-        if line.startswith("INSTALLATION_UUID="):
-            myhostuuid = line[19:-2]
+    with open("/etc/xensource-inventory", "r") as fd:
+        lines = fd.readlines()
+        for line in lines:
+            if line.startswith("INSTALLATION_UUID="):
+                myhostuuid = line[19:-2]
 
-for nodeid in nodeids:
-    liveness[nodeid] = "FALSE"
-    with open(sr_mount + "/.ha/host/" + nodeid + "/hostuuid", "r") as fd:
-        uuid[nodeid] = fd.readline().rstrip()
-    with open(sr_mount + "/.ha/host/" + nodeid + "/hostname", "r") as fd:
-        if master == fd.readline().rstrip():
-            ismaster[nodeid] = "TRUE"
-        else:
-            ismaster[nodeid] = "FALSE"
+    for nodeid in nodeids:
+        liveness[nodeid] = "FALSE"
+        with open(sr_mount + "/.ha/host/" + nodeid + "/hostuuid", "r") as fd:
+            uuid[nodeid] = fd.readline().rstrip()
+        with open(sr_mount + "/.ha/host/" + nodeid + "/hostname", "r") as fd:
+            if master == fd.readline().rstrip():
+                ismaster[nodeid] = "TRUE"
+            else:
+                ismaster[nodeid] = "FALSE"
 
-for line in dlm_output_lines:
-    if line.startswith("node "):
-        parts = line.split(" ")
-        if parts[2] == 'M':
-            liveness[parts[1]] = "TRUE"
-            liveset += (" " + uuid[parts[1]])
-        elif parts[2] == 'X':
-            liveness[parts[1]] = "FALSE"
+    for line in dlm_output_lines:
+        if line.startswith("node "):
+            parts = line.split(" ")
+            if parts[2] == 'M':
+                liveness[parts[1]] = "TRUE"
+                liveset += (" " + uuid[parts[1]])
+            elif parts[2] == 'X':
+                liveness[parts[1]] = "FALSE"
+except:
+    print "HA pool state invalid"
+    sys.exit(0)
 
 out = """<?xml version="1.0" encoding="UTF-8"?>
 <ha_liveset_info version="1.0">
@@ -137,7 +141,6 @@ out += """
     <Xapi_healthcheck_approaching_timeout>FALSE</Xapi_healthcheck_approaching_timeout>
     <network_bonding_error>FALSE</network_bonding_error>
   </warning_on_local_host>
-</ha_liveset_info>
-"""
+</ha_liveset_info>"""
 
 print out
