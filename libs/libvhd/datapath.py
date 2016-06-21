@@ -2,7 +2,8 @@ from __future__ import absolute_import
 import urlparse
 import sys
 
-from xapi.storage.libs import util, log, poolhelper, tapdisk, image
+from xapi.storage.libs import util, poolhelper, tapdisk, image
+from xapi.storage import log
 
 from .vhdutil import VHDUtil
 from .metabase import VHDMetabase
@@ -109,7 +110,7 @@ class VHDDatapath(object):
 
     @staticmethod
     def epc_open(dbg, uri, persistent, cb):
-        log.Log.debug("{}: Datapath.epc_open: uri == {}".format(dbg, uri))
+        log.debug("{}: Datapath.epc_open: uri == {}".format(dbg, uri))
 
         sr, key = _parse_uri(uri)
         opq = cb.volumeStartOperations(sr, 'w')
@@ -124,7 +125,7 @@ class VHDDatapath(object):
                         vdi = db.get_vdi_by_id(key)
                         vol_path = cb.volumeGetPath(opq, str(vdi.vhd.id))
                         if (persistent):
-                            log.Log.debug(
+                            log.debug(
                                 ("{}: Datapath.epc_open: "
                                  "{} is persistent").format(dbg, vol_path)
                             )
@@ -133,14 +134,14 @@ class VHDDatapath(object):
                                 VHDUtil.reset(dbg, vol_path)
                                 db.update_vdi_nonpersistent(vdi.uuid, 1)
                         elif vdi.nonpersistent:
-                            log.Log.debug(
+                            log.debug(
                                 ("{}: Datapath.epc_open: {} already "
                                  "marked non-persistent").format(dbg, vol_path)
                             )
                             # truncate
                             VHDUtil.reset(dbg, vol_path)
                         else:
-                            log.Log.debug(
+                            log.debug(
                                 ("{}: Datapath.epc_open: {} is "
                                  "non-persistent").format(dbg, vol_path)
                             )
@@ -149,7 +150,7 @@ class VHDDatapath(object):
                                 # Create single clone
                                 VHDDatapath.create_single_clone(db, sr, key, cb)
                 except:
-                    log.Log.error(
+                    log.error(
                         ("{}: Datapath.epc_open: failed to complete "
                          "open, {}").format(dbg, sys.exc_info()[0])
                     )
@@ -161,7 +162,7 @@ class VHDDatapath(object):
 
     @staticmethod
     def epc_close(dbg, uri, cb):
-        log.Log.debug("{}: Datapath.epc_close: uri == {}".format(dbg, uri))
+        log.debug("{}: Datapath.epc_close: uri == {}".format(dbg, uri))
         sr, key = _parse_uri(uri)
         opq = cb.volumeStartOperations(sr, 'w')
 
@@ -178,7 +179,7 @@ class VHDDatapath(object):
                         VHDUtil.reset(dbg, vol_path)
                         db.update_vdi_nonpersistent(vdi.uuid, None)
         except:
-            log.Log.error(
+            log.error(
                 ("{}: Datapath.epc_close: failed to complete "
                  "close, {}").format(dbg, sys.exc_info()[1])
             )
