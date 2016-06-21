@@ -1,6 +1,5 @@
-from xapi.storage.libs import log
+from xapi.storage import log
 import XenAPI
-
 
 def get_online_host_refs(dbg, session):
     # This function is borrowed from xapi-project/sm.git/util.py

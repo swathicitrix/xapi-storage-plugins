@@ -2,7 +2,8 @@ from __future__ import absolute_import
 import urlparse
 import sys
 
-from xapi.storage.libs import util, log, poolhelper, tapdisk, image
+from xapi.storage.libs import util, poolhelper, tapdisk, image
+from xapi.storage import log
 
 from .vhdutil import VHDUtil
 from .metabase import VHDMetabase

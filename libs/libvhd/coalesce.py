@@ -8,7 +8,7 @@ import sys
 import time
 import errno
 
-from xapi.storage.libs import log
+from xapi.storage import log
 from xapi.storage.libs import poolhelper
 
 from .vhdutil import VHDUtil

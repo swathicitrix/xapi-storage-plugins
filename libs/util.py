@@ -2,7 +2,7 @@
 
 import os, sys
 import time
-from xapi.storage.libs import log
+from xapi.storage import log
 import xml.dom.minidom
 import fcntl
 import errno

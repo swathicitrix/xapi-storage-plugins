@@ -1,5 +1,5 @@
 from xapi.storage.libs.util import call
-from xapi.storage.libs import log
+from xapi.storage import log
 
 MEBIBYTE = 2**20
 MSIZE_MIB = 2 * MEBIBYTE
