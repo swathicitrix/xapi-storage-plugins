@@ -296,6 +296,26 @@ class VHDMetabase(object):
             vhds.append(VHD.from_row(row))
         return vhds
 
+    def get_garbage_vhds(self):
+        """ A garbage VHD is a leaf VHD with no associated VDI """
+        res = self._conn.execute("""
+            SELECT * FROM VHD
+             WHERE id NOT IN
+                (SELECT parent_id
+                   FROM vhd
+                  WHERE parent_id NOT NULL
+               GROUP BY parent_id)
+                AND id NOT IN
+                 (SELECT vhd_id 
+                    FROM vdi
+                GROUP BY vhd_id)""")
+
+        vhds = []
+        for row in res:
+            vhds.append(VHD.from_row(row))
+
+        return vhds
+
     @contextmanager
     def write_context(self):
         with self._conn:

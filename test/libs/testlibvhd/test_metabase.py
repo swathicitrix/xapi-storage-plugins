@@ -283,3 +283,17 @@ class VHDMetabaseTest(unittest.TestCase):
 
         self.assertEquals("VDI1", vdi.name)
         self.assertEquals("1", vdi.uuid)
+
+    def test_find_garbage_vhd_success(self):
+        self.subject.populate_test_set_2()
+
+        vhds = self.subject.get_garbage_vhds()
+
+        self.assertEquals(0, len(vhds))
+
+        # Remove VDI for node 7
+        self.subject.delete_vdi(str(4))
+
+        vhds = self.subject.get_garbage_vhds()
+
+        self.assertEquals(1, len(vhds))
