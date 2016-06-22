@@ -12,9 +12,6 @@ Requires:       xapi-storage
 #Requires:       dlm
 #Requires:       dlm-lib
 #Requires:       gfs2-utils
-BuildRequires:  python-nose
-BuildRequires:  python-coverage
-BuildRequires:  python2-mock
 
 %description
 Storage plugins for the xapi toolstack.
@@ -29,9 +26,6 @@ DESTDIR=%{buildroot} \
 SM_PLUGINS_DIR=%{buildroot}/%{_libexecdir}/xapi-storage-script \
 LIBS_DIR=%{buildroot}/usr/lib/python2.7/site-packages/xapi/storage/libs \
 make install
-
-%check
-/myrepos/xapi-storage-plugins/test/run_python_unittests.sh
 
 %files
 %doc README.md LICENSE
