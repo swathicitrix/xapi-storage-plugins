@@ -8,52 +8,57 @@ TESTROOT="$PLUGINROOT/test"
 
 function finish {
     (
-        cd "$PLUGINROOT"/libs
-        if [ -h xapi ]; then rm xapi; fi
-        if [ -h storage ]; then rm storage; fi
+        cd "$PLUGINROOT/mocks/xapi/storage"
         if [ -h libs ]; then rm libs; fi
     )
 }
 
 trap finish EXIT
 
-set +u
-. "$ENVDIR/bin/activate"
-set -u
+if [ -z "${CHROOT-default}" ]; then
+    if [ ! -d $ENVDIR ]; then
+        $(dirname $0)/setup_env_for_python_unittests.sh
+    fi
+
+    set +u
+    . "$ENVDIR/bin/activate"
+    set -u
+fi
 
 (
     cd "$PLUGINROOT"
 
     LIBDIRS="$PLUGINROOT/libs"
-    LIBTESTS=`find $PLUGINROOT/test/libs -name test_\*.py`
+    DATAPATHDIRS=`find $PLUGINROOT/datapath -maxdepth 1 -type d | tr '\n' ' '`
+    VOLUMEDIRS=`find $PLUGINROOT/volume -maxdepth 1 -type d  | tr '\n' ' '`
+    SOURCEDIRS="$DATAPATHDIRS $VOLUMEDIRS $LIBDIRS $TESTROOT"
+
+    SOURCE=`find $SOURCEDIRS -name \*.py | tr '\n' ','`
+
+    MOCKSDIR="$PLUGINROOT/mocks"
 
     # Run pylint over the code under test first
-    #pylint $SOURCE
+    pylint -E $SOURCE
 
     # clear the coverage
     coverage erase
 
     # Create some namespace symlink
     (
-        cd "$PLUGINROOT"/libs
-        if [ -h xapi ]; then rm xapi; fi
-        ln -s . xapi
-        if [ -h storage ]; then rm storage; fi
-        ln -s . storage
+        cd "$PLUGINROOT/mocks/xapi/storage"
         if [ -h libs ]; then rm libs; fi
-        ln -s . libs
+        ln -s $LIBDIRS libs
     )
 
     # Test the libs
-    echo $LIBDIRS
-    PYTHONPATH="`echo "$LIBDIRS" | tr ' ' ':'`" \
+    LIBTESTS=`find $PLUGINROOT/test/libs -name test_\*.py`
+    PYTHONPATH=$MOCKSDIR \
     coverage run --branch $(which nosetests) \
         --with-xunit                \
         --xunit-file=nosetests-libs.xml  \
         $LIBTESTS
 
     # Test datapath plugins
-    DATAPATHDIRS=`find $PLUGINROOT/datapath -maxdepth 1 -type d | tr '\n' ' '`
     DATAPATHTESTROOT="$TESTROOT/datapath"
     for datapath in $DATAPATHDIRS; do
         LEAF=$(basename $datapath)
@@ -65,7 +70,6 @@ set -u
     done
 
     # Test volume plugins
-    VOLUMEDIRS=`find $PLUGINROOT/volume -maxdepth 1 -type d  | tr '\n' ' '`
     VOLUMETESTROOT="$TESTROOT/volume"
     for volume in $VOLUMEDIRS; do
         LEAF=$(basename $volume)
@@ -75,10 +79,6 @@ set -u
             echo "Found test folder for $LEAF"
         fi
     done
-
-    SOURCEDIRS="$DATAPATHDIRS $VOLUMEDIRS $LIBDIRS $TESTROOT"
-
-    SOURCE=`find $SOURCEDIRS -name \*.py | tr '\n' ','`
 
     coverage report --include="$SOURCE"
     coverage xml --include="$SOURCE"

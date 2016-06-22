@@ -2,10 +2,10 @@ import mock
 import unittest
 from contextlib import contextmanager
 
-from libvhd.metabase import VHD, VDI
-import libvhd.datapath
+from xapi.storage.libs.libvhd.metabase import VHD, VDI
+from xapi.storage.libs.libvhd import datapath
 
-import libvhd.volume
+from xapi.storage.libs.libvhd import volume
 
 @contextmanager
 def test_context():
@@ -14,9 +14,9 @@ def test_context():
 
 class TestVHDVolume(unittest.TestCase):
     
-    @mock.patch('libvhd.volume.VHDMetabase')
-    @mock.patch('libvhd.volume.VHDUtil')
-    @mock.patch('libvhd.datapath.poolhelper')
+    @mock.patch('xapi.storage.libs.libvhd.volume.VHDMetabase')
+    @mock.patch('xapi.storage.libs.libvhd.volume.VHDUtil')
+    @mock.patch('xapi.storage.libs.libvhd.datapath.poolhelper')
     def test_clone_refresh_datapath_success(self, poolhelper, mockVHDUtil, mockDatabase):
         callbacks = mock.MagicMock()
 
@@ -60,7 +60,7 @@ class TestVHDVolume(unittest.TestCase):
 
         mockVHDUtil.is_parent_pointing_to_path.return_value = True
 
-        clone = libvhd.volume.VHDVolume.clone("test", "test-sr", "test-vhd", callbacks)
+        clone = volume.VHDVolume.clone("test", "test-sr", "test-vhd", callbacks)
         
         poolhelper.refresh_datapath_on_host.assert_called()
         # Snapshot should be called twice
@@ -70,9 +70,9 @@ class TestVHDVolume(unittest.TestCase):
         callbacks.volumeStartOperations.assert_called()
         callbacks.volumeStopOperations.assert_called()
 
-    @mock.patch('libvhd.volume.VHDMetabase')
-    @mock.patch('libvhd.volume.VHDUtil')
-    @mock.patch('libvhd.datapath.poolhelper')
+    @mock.patch('xapi.storage.libs.libvhd.volume.VHDMetabase')
+    @mock.patch('xapi.storage.libs.libvhd.volume.VHDUtil')
+    @mock.patch('xapi.storage.libs.libvhd.datapath.poolhelper')
     def test_clone_not_active_success(self, poolhelper, mockVHDUtil, mockDatabase):
         callbacks = mock.MagicMock()
 
@@ -116,7 +116,7 @@ class TestVHDVolume(unittest.TestCase):
 
         mockVHDUtil.is_parent_pointing_to_path.return_value = True
 
-        clone = libvhd.volume.VHDVolume.clone("test", "test-sr", "test-vhd", callbacks)
+        clone = volume.VHDVolume.clone("test", "test-sr", "test-vhd", callbacks)
         
         poolhelper.refresh_datapath_on_host.assert_not_called()
         # Snapshot should be called twice
@@ -126,9 +126,9 @@ class TestVHDVolume(unittest.TestCase):
         callbacks.volumeStartOperations.assert_called()
         callbacks.volumeStopOperations.assert_called()
 
-    @mock.patch('libvhd.volume.VHDMetabase')
-    @mock.patch('libvhd.volume.VHDUtil')
-    @mock.patch('libvhd.datapath.poolhelper')
+    @mock.patch('xapi.storage.libs.libvhd.volume.VHDMetabase')
+    @mock.patch('xapi.storage.libs.libvhd.volume.VHDUtil')
+    @mock.patch('xapi.storage.libs.libvhd.datapath.poolhelper')
     def test_clone_single_success(self, poolhelper, mockVHDUtil, mockDatabase):
         callbacks = mock.MagicMock()
 
@@ -165,7 +165,7 @@ class TestVHDVolume(unittest.TestCase):
 
         mockVHDUtil.is_parent_pointing_to_path.return_value = False
 
-        clone = libvhd.volume.VHDVolume.clone("test", "test-sr", "test-vhd", callbacks)
+        clone = volume.VHDVolume.clone("test", "test-sr", "test-vhd", callbacks)
         
         poolhelper.refresh_datapath_on_host.assert_not_called()
         # Snapshot should be called once

@@ -1,11 +1,11 @@
 import unittest
 import uuid
-import libvhd.metabase
+from xapi.storage.libs.libvhd import metabase
 
-class StubVHDMetabase(libvhd.metabase.VHDMetabase):
+class StubVHDMetabase(metabase.VHDMetabase):
 
     def __init__(self):
-        libvhd.metabase.VHDMetabase.__init__(self, ":memory:")
+        metabase.VHDMetabase.__init__(self, ":memory:")
 
     def schema_check(self):
         with self._conn:

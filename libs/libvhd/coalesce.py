@@ -11,9 +11,9 @@ import errno
 from xapi.storage import log
 from xapi.storage.libs import poolhelper
 
-from .vhdutil import VHDUtil
-from .metabase import VHDMetabase
-from .lock import Lock
+from xapi.storage.libs.libvhd.vhdutil import VHDUtil
+from xapi.storage.libs.libvhd.metabase import VHDMetabase
+from xapi.storage.libs.libvhd.lock import Lock
 
 # Debug string
 GC = 'GC'
