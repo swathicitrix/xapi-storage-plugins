@@ -8,7 +8,7 @@ import sys
 import time
 import errno
 
-from xapi.storage import log
+from xapi.storage.libs import log
 from xapi.storage.libs import poolhelper
 
 from .vhdutil import VHDUtil
@@ -46,14 +46,14 @@ def get_sr_callbacks(sr_type):
 def find_non_leaf_coalesceable(db):
     results = db.find_non_leaf_coalesceable()
     if len(results) > 0:
-        log.debug("Found {} non leaf coalescable nodes".format(len(results)))
+        log.Log.debug("Found {} non leaf coalescable nodes".format(len(results)))
     return results
 
 #def find_leaf_coalesceable(db):
 #    results = db.find_leaf_coalesceable()
 #    for row in results:
-#        log.debug("%s" % str(row))
-#    log.debug("Found %s leaf coalescable nodes" % len(results))
+#        log.Log.debug("%s" % str(row))
+#    log.Log.debug("Found %s leaf coalescable nodes" % len(results))
 #    return results
 
 def find_leaves(vhd, db, leaf_accumulator):
@@ -67,7 +67,7 @@ def find_leaves(vhd, db, leaf_accumulator):
 
 def find_root_node(key, db):
     if key.parent_id == None:
-        log.debug("Found root node {}".format(key))
+        log.Log.debug("Found root node {}".format(key))
         return key
     else:
         parent = db.get_vhd_by_id(key.parent_id)
@@ -76,17 +76,17 @@ def find_root_node(key, db):
 def tap_ctl_pause(node, cb, opq):
     if node.active_on:
         node_path = cb.volumeGetPath(opq, str(node.vhd.id))
-        log.debug("VHD {} active on {}".format(node.vhd.id, node.active_on))
+        log.Log.debug("VHD {} active on {}".format(node.vhd.id, node.active_on))
         poolhelper.suspend_datapath_on_host(GC, node.active_on, node_path)
 
 def tap_ctl_unpause(node, cb, opq):
     if node.active_on:
         node_path = cb.volumeGetPath(opq, str(node.vhd.id))
-        log.debug("VHD {} active on {}".format(node.vhd.id, node.active_on))
+        log.Log.debug("VHD {} active on {}".format(node.vhd.id, node.active_on))
         poolhelper.resume_datapath_on_host(GC, node.active_on, node_path)
 
 # def leaf_coalesce_snapshot(key, conn, cb, opq):
-#     log.debug("leaf_coalesce_snapshot key=%s" % key)
+#     log.Log.debug("leaf_coalesce_snapshot key=%s" % key)
 #     key_path = cb.volumeGetPath(opq, key)
 
 #     res = conn.execute("select name,parent,description,uuid,vsize from VDI where rowid = (?)",
@@ -111,7 +111,7 @@ def tap_ctl_unpause(node, cb, opq):
 #     tap_ctl_unpause(key, conn, cb, opq)
 
 def non_leaf_coalesce(node, parent, uri, cb):
-    log.debug("non_leaf_coalesce key={}, parent={}".format(node.id, parent.id))
+    log.Log.debug("non_leaf_coalesce key={}, parent={}".format(node.id, parent.id))
     #conn.execute("node is coalescing")
 
     opq = cb.volumeStartOperations(uri, 'w')
@@ -120,7 +120,7 @@ def non_leaf_coalesce(node, parent, uri, cb):
     node_path = cb.volumeGetPath(opq, str(node.id))
     parent_path = cb.volumeGetPath(opq, str(parent.id))
 
-    log.debug("Running vhd-coalesce on {}".format(node.id))
+    log.Log.debug("Running vhd-coalesce on {}".format(node.id))
     VHDUtil.coalesce(GC, node_path)
 
     db = VHDMetabase(meta_path)
@@ -128,14 +128,14 @@ def non_leaf_coalesce(node, parent, uri, cb):
         # reparent all of the children to this node's parent
         children = db.get_children(node.id)
 
-        # log.debug("List of children: %s" % children)
+        # log.Log.debug("List of children: %s" % children)
         for child in children:
             child_path = cb.volumeGetPath(opq, str(child.id))
 
             # pause all leaves having child as an ancestor
             leaves = []
             find_leaves(child, db, leaves)
-            log.debug(
+            log.Log.debug(
                 ("Children of {}: pausing all "
                  "leaves: {}").format(child.id, len(leaves))
             )
@@ -143,25 +143,25 @@ def non_leaf_coalesce(node, parent, uri, cb):
                 tap_ctl_pause(leaf, cb, opq)
 
             # reparent child to grandparent
-            log.debug("Reparenting {} to {}".format(child.id, parent.id))
+            log.Log.debug("Reparenting {} to {}".format(child.id, parent.id))
             with db.write_context():
                 db.update_vhd_parent(child.id, parent.id)
                 VHDUtil.set_parent(GC, child_path, parent_path)
 
             # unpause all leaves having child as an ancestor
-            log.debug(
+            log.Log.debug(
                 ("Children {}: unpausing all "
                  "leaves: {}").format(child.id, leaves))
             for leaf in leaves:
                 tap_ctl_unpause(leaf, cb, opq)
 
         root_node = find_root_node(parent, db)
-        log.debug("Setting gc_status to None root node {}".format(root_node))
+        log.Log.debug("Setting gc_status to None root node {}".format(root_node))
         with db.write_context():
             db.update_vhd_gc_status(root_node.id, None)
 
         # remove key
-        log.debug("Destroy {}".format(node.id))
+        log.Log.debug("Destroy {}".format(node.id))
         cb.volumeDestroy(opq, str(node.id))
         with db.write_context():
             db.delete_vdi(node.id)
@@ -170,14 +170,14 @@ def non_leaf_coalesce(node, parent, uri, cb):
     cb.volumeStopOperations(opq)
 
 # def sync_leaf_coalesce(key, parent_key, conn, cb, opq):
-#     log.debug("leaf_coalesce_snapshot key=%s" % key)
+#     log.Log.debug("leaf_coalesce_snapshot key=%s" % key)
 #     key_path = cb.volumeGetPath(opq, key)
 #     parent_path = cb.volumeGetPath(opq, parent_key)
 
 #     res = conn.execute("select parent from VDI where rowid = (?)",
 #                        (int(parent_key),)).fetchall()
 #     p_parent = res[0][0]
-#     log.debug("%s" % str(p_parent))
+#     log.Log.debug("%s" % str(p_parent))
 #     if p_parent:
 #         p_parent = int(p_parent)
 #     else:
@@ -200,7 +200,7 @@ def non_leaf_coalesce(node, parent, uri, cb):
 #     tap_ctl_unpause(key, conn, cb, opq)
 
 # def leaf_coalesce(key, parent_key, conn, cb, opq):
-#     log.debug("leaf_coalesce key=%s, parent=%s" % (key, parent_key))
+#     log.Log.debug("leaf_coalesce key=%s, parent=%s" % (key, parent_key))
 #     psize = cb.volumeGetPhysSize(opq, key)
 #     if psize > (20 * 1024 * 1024):
 #         leaf_coalesce_snapshot(key, conn, cb, opq)
@@ -277,7 +277,7 @@ class VHDCoalesce(object):
     def start_gc(dbg, sr_type, uri):
         args = [os.path.abspath(__file__), sr_type, uri]
         subprocess.Popen(args)
-        log.debug("{}: Started GC sr_type={} uri={}".format(dbg, sr_type, uri))
+        log.Log.debug("{}: Started GC sr_type={} uri={}".format(dbg, sr_type, uri))
 
     @staticmethod
     def stop_gc(dbg, sr_type, uri):

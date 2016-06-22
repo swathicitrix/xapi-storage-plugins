@@ -1,4 +1,4 @@
-from xapi.storage import log
+from xapi.storage.libs.log import Log
 
 def get_online_host_refs(dbg, session):
     # This function is borrowed from xapi-project/sm.git/util.py

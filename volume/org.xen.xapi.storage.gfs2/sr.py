@@ -260,8 +260,6 @@ class Implementation(xapi.storage.api.volume.SR_skeleton):
         except:
             log.debug("%s: SR.attach: uri=%s NOT ATTACHED YET" % (dbg, uri))
 
-        output = ""
-
         for attempt in range(1,20):
             try:
                 output = call(dbg, ["/usr/bin/systemctl", "is-active", "corosync"]).rstrip()

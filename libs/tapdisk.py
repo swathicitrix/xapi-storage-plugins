@@ -6,7 +6,7 @@ import signal
 
 import image
 from xapi.storage.libs.util import call
-from xapi.storage import log
+from xapi.storage.libs import log
 import pickle
 import urlparse
 
