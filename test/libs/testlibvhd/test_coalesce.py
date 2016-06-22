@@ -32,11 +32,7 @@ class VHDCoalesceTest(unittest.TestCase):
         mockDB.update_vhd_gc_status.assert_not_called()
 
     @mock.patch('libvhd.coalesce.VHDMetabase')
-    @mock.patch('libvhd.coalesce.log')
-    def test_find_best_non_leaf_coalesce_success(
-        self,
-        mockLog,
-        mockMetabase):
+    def test_find_best_non_leaf_coalesce_success(self, mockMetabase):
         # Setup the mocks
         callbacks = mock.MagicMock()
         mockDB = mock.MagicMock()
@@ -178,11 +174,7 @@ class VHDCoalesceTest(unittest.TestCase):
 
 
     @mock.patch('libvhd.coalesce.VHDMetabase')
-    @mock.patch('libvhd.coalesce.log')
-    def test_find_best_non_leaf_coalesce_one_coalescing_success(
-        self,
-        mockLog,
-        mockMetabase):
+    def test_find_best_non_leaf_coalesce_one_coalescing_success(self, mockMetabase):
         # Setup the mocks
         callbacks = mock.MagicMock()
         mockDB = mock.MagicMock()
@@ -248,10 +240,8 @@ class VHDCoalesceTest(unittest.TestCase):
     @mock.patch('libvhd.coalesce.VHDUtil.set_parent')
     @mock.patch('libvhd.coalesce.VHDUtil.coalesce')
     @mock.patch('libvhd.coalesce.poolhelper')
-    @mock.patch('libvhd.coalesce.log')
     def test_non_leaf_coalesce_success_non_active(
             self,
-            mockLog,
             mockPoolHelper,
             mock_vhdutil_coalesce,
             mock_vhdutil_set_parent,
@@ -322,10 +312,8 @@ class VHDCoalesceTest(unittest.TestCase):
     @mock.patch('libvhd.coalesce.VHDUtil.set_parent')
     @mock.patch('libvhd.coalesce.VHDUtil.coalesce')
     @mock.patch('libvhd.coalesce.poolhelper')
-    @mock.patch('libvhd.coalesce.log')
     def test_non_leaf_coalesce_success_active(
             self,
-            mockLog,
             mockPoolHelper,
             mock_vhdutil_coalesce,
             mock_vhdutil_set_parent,

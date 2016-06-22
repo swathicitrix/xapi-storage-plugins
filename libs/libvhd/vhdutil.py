@@ -91,5 +91,5 @@ class VHDUtil(object):
     def is_parent_pointing_to_path(dbg, vol_path, parent_path):
         stdout = VHDUtil.get_parent(dbg, vol_path)
         path = stdout.rstrip()
-        log.Log.debug("is_parent_pointing_to_path {} {}".format(parent_path, path))
+        log.debug("is_parent_pointing_to_path {} {}".format(parent_path, path))
         return parent_path[-12:] == path[-12:]
