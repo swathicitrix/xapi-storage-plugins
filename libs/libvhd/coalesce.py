@@ -164,7 +164,7 @@ def non_leaf_coalesce(node, parent, uri, cb):
         log.debug("Destroy {}".format(node.id))
         cb.volumeDestroy(opq, str(node.id))
         with db.write_context():
-            db.delete_vdi(node.id)
+            db.delete_vhd(node.id)
 
     db.close()
     cb.volumeStopOperations(opq)
@@ -231,6 +231,21 @@ def find_best_non_leaf_coalesceable_2(uri, cb):
     cb.volumeStopOperations(opq)
     return ret
 
+def remove_garbage_vhds(uri, cb):
+    opq = cb.volumeStartOperations(uri, 'w')
+    meta_path = cb.volumeMetadataGetPath(opq)
+    db = VHDMetabase(meta_path)
+
+    garbage = db.get_garbage_vhds()
+
+    if len(garbage) > 0:
+        for vhd in garbage:
+            cb.volumeDestroy(opq, str(vhd.id))
+            with db.write_context():
+                db.delete_vhd(vhd.id)
+    db.close()
+    cb.volumeStopOperations(opq)
+
 def daemonize():
     for fd in [0, 1, 2]:
         try:
@@ -254,6 +269,8 @@ def run_coalesce(sr_type, uri):
     touch(gc_running)
 
     while True:
+        remove_garbage_vhds(uri, cb)
+
         child, parent = find_best_non_leaf_coalesceable_2(uri, cb)
         if (child, parent) != (None, None):
             non_leaf_coalesce(child, parent, uri, cb)

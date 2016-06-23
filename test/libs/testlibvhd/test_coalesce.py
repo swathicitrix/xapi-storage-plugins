@@ -307,7 +307,7 @@ class VHDCoalesceTest(unittest.TestCase):
         mock_vhdutil_coalesce.assert_called()
         mock_vhdutil_set_parent.assert_called()
         mockDB.update_vhd_parent.assert_called_with(4, 2)
-        mockDB.delete_vdi.assert_called_with(3)
+        mockDB.delete_vhd.assert_called_with(3)
         # Node wasn't active so no need to refresh the datapath
         mockPoolHelper.suspend_datapath_on_host.assert_not_called()
         mockPoolHelper.resume_datapath_on_host.assert_not_called()
@@ -346,7 +346,7 @@ class VHDCoalesceTest(unittest.TestCase):
         mockDB = mock.MagicMock()
         mockMetabase.return_value = mockDB
         mockDB.write_context.side_effect = test_context
-        # This is the rot node of the tree
+        # This is the root node of the tree
         mockDB.get_vhd_by_id.side_effect = [
             VHD(
                 1,
@@ -381,7 +381,67 @@ class VHDCoalesceTest(unittest.TestCase):
         mock_vhdutil_coalesce.assert_called()
         mock_vhdutil_set_parent.assert_called()
         mockDB.update_vhd_parent.assert_called_with(4, 2)
-        mockDB.delete_vdi.assert_called_with(3)
+        mockDB.delete_vhd.assert_called_with(3)
         # Node was active so need to refresh the datapath on the correct host
         mockPoolHelper.suspend_datapath_on_host.assert_called_with("GC", "Host1", mock.ANY)
         mockPoolHelper.resume_datapath_on_host.assert_called_with("GC", "Host1", mock.ANY)
+
+    @mock.patch('xapi.storage.libs.libvhd.coalesce.VHDMetabase')
+    def test_remove_garbage_vhds_none(self, mockMetabase):
+        # Setup some mocks
+        callbacks = mock.MagicMock()
+        mockDB = mock.MagicMock()
+        mockMetabase.return_value = mockDB
+        mockDB.write_context.side_effect = test_context
+        mockDB.get_garbage_vhds.return_value = []
+
+        # call the code
+        coalesce.remove_garbage_vhds("test-uri", callbacks)
+
+        # check the results
+        callbacks.volumeStartOperations.assert_called_with("test-uri", 'w')
+        callbacks.volumeStopOperations.assert_called()
+        callbacks.volumeDestroy.assert_not_called()
+        mockDB.get_garbage_vhds.assert_called()
+        mockDB.delete_vhd.assert_not_called()
+
+    @mock.patch('xapi.storage.libs.libvhd.coalesce.VHDMetabase')
+    def test_remove_garbage_vhds_two(self, mockMetabase):
+        # Setup some mocks
+        callbacks = mock.MagicMock()
+        mockDB = mock.MagicMock()
+        mockMetabase.return_value = mockDB
+        mockDB.write_context.side_effect = test_context
+        mockDB.get_garbage_vhds.return_value = [
+            VHD(
+                4,
+                3,
+                0,
+                10*1024,
+                10*1024
+                ),
+
+            VHD(
+                5,
+                3,
+                0,
+                10*1024,
+                10*1024
+                )
+            ]
+
+        # call the code
+        coalesce.remove_garbage_vhds("test-uri", callbacks)
+
+        # check the results
+        callbacks.volumeStartOperations.assert_called_with("test-uri", 'w')
+        callbacks.volumeStopOperations.assert_called()
+        callbacks.volumeDestroy.assert_has_calls(
+            [mock.call(mock.ANY, str(4)),mock.call(mock.ANY, str(5))],
+            any_order=True)
+        self.assertEquals(2, callbacks.volumeDestroy.call_count)
+        mockDB.get_garbage_vhds.assert_called()
+        mockDB.delete_vhd.assert_has_calls(
+            [mock.call(4), mock.call(5)],
+            any_order=True)
+        self.assertEquals(2, mockDB.delete_vhd.call_count)
