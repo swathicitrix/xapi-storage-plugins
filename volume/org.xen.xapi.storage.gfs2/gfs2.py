@@ -87,3 +87,14 @@ class Callbacks():
         log.debug("volumeUnlock opq=%s" % opq)
         fcntl.flock(lock, fcntl.LOCK_UN)
         lock.close
+    def volumeTryLock(self, opq, name):
+        try:
+            log.debug("volumeLock opq=%s name=%s" % (opq, name))
+            vol_path = os.path.join(opq, name)
+            lock = open(vol_path, 'w+')
+            fcntl.flock(lock, fcntl.LOCK_EX| fcntl.LOCK_NB)
+            return lock
+        except IOError, e:
+            if e.errno in [errno.EACCESS, errno.EAGAIN]:
+                return None
+            raise

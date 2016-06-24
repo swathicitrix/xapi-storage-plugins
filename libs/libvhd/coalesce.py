@@ -18,6 +18,11 @@ from .lock import Lock
 # Debug string
 GC = 'GC'
 
+class VhdLock:
+    def __init__(self, vhd, lock):
+        self.vhd = vhd
+        self.lock = lock
+
 # See also: http://stackoverflow.com/a/1160227
 def touch(filename):
     if not os.path.exists(os.path.dirname(filename)):
@@ -65,14 +70,6 @@ def find_leaves(vhd, db, leaf_accumulator):
         for child in children:
             find_leaves(child, db, leaf_accumulator)
 
-def find_root_node(key, db):
-    if key.parent_id == None:
-        log.debug("Found root node {}".format(key))
-        return key
-    else:
-        parent = db.get_vhd_by_id(key.parent_id)
-        return find_root_node(parent, db)
-
 def tap_ctl_pause(node, cb, opq):
     if node.active_on:
         node_path = cb.volumeGetPath(opq, str(node.vhd.id))
@@ -111,22 +108,24 @@ def tap_ctl_unpause(node, cb, opq):
 #     tap_ctl_unpause(key, conn, cb, opq)
 
 def non_leaf_coalesce(node, parent, uri, cb):
-    log.debug("non_leaf_coalesce key={}, parent={}".format(node.id, parent.id))
-    #conn.execute("node is coalescing")
+    node_vhd = node.vhd
+    parent_vhd = parent.vhd
+
+    log.debug("non_leaf_coalesce key={}, parent={}".format(node_vhd.id, parent_vhd.id))
 
     opq = cb.volumeStartOperations(uri, 'w')
     meta_path = cb.volumeMetadataGetPath(opq)
 
-    node_path = cb.volumeGetPath(opq, str(node.id))
-    parent_path = cb.volumeGetPath(opq, str(parent.id))
+    node_path = cb.volumeGetPath(opq, str(node_vhd.id))
+    parent_path = cb.volumeGetPath(opq, str(parent_vhd.id))
 
-    log.debug("Running vhd-coalesce on {}".format(node.id))
+    log.debug("Running vhd-coalesce on {}".format(node_vhd.id))
     VHDUtil.coalesce(GC, node_path)
 
     db = VHDMetabase(meta_path)
     with Lock(opq, "gl", cb):
         # reparent all of the children to this node's parent
-        children = db.get_children(node.id)
+        children = db.get_children(node_vhd.id)
 
         # log.debug("List of children: %s" % children)
         for child in children:
@@ -143,9 +142,9 @@ def non_leaf_coalesce(node, parent, uri, cb):
                 tap_ctl_pause(leaf, cb, opq)
 
             # reparent child to grandparent
-            log.debug("Reparenting {} to {}".format(child.id, parent.id))
+            log.debug("Reparenting {} to {}".format(child.id, parent_vhd.id))
             with db.write_context():
-                db.update_vhd_parent(child.id, parent.id)
+                db.update_vhd_parent(child.id, parent_vhd.id)
                 VHDUtil.set_parent(GC, child_path, parent_path)
 
             # unpause all leaves having child as an ancestor
@@ -155,16 +154,14 @@ def non_leaf_coalesce(node, parent, uri, cb):
             for leaf in leaves:
                 tap_ctl_unpause(leaf, cb, opq)
 
-        root_node = find_root_node(parent, db)
-        log.debug("Setting gc_status to None root node {}".format(root_node))
-        with db.write_context():
-            db.update_vhd_gc_status(root_node.id, None)
-
         # remove key
-        log.debug("Destroy {}".format(node.id))
-        cb.volumeDestroy(opq, str(node.id))
+        log.debug("Destroy {}".format(node_vhd.id))
+        cb.volumeDestroy(opq, str(node_vhd.id))
         with db.write_context():
-            db.delete_vhd(node.id)
+            db.delete_vhd(node_vhd.id)
+
+        cb.volumeUnlock(opq, node.lock)
+        cb.volumeUnlock(opq, parent.lock)
 
     db.close()
     cb.volumeStopOperations(opq)
@@ -210,6 +207,9 @@ def non_leaf_coalesce(node, parent, uri, cb):
 #def find_best_non_leaf_coalesceable(rows):
 #    return str(rows[0][0]), str(rows[0][1])
 
+def __create_vhd_lock_name(vhd_id):
+    return "vhd-{}.lock".format(vhd_id)
+
 def find_best_non_leaf_coalesceable_2(uri, cb):
     opq = cb.volumeStartOperations(uri, 'w')
     meta_path = cb.volumeMetadataGetPath(opq)
@@ -219,14 +219,15 @@ def find_best_non_leaf_coalesceable_2(uri, cb):
     with Lock(opq, 'gl', cb):
         nodes = find_non_leaf_coalesceable(db)
         for node in nodes:
-            if not node.gc_status:
-                root_node = find_root_node(node, db)
-                if not root_node.gc_status:
-                    with db.write_context():
-                        db.update_vhd_gc_status(node.id, 'Coalescing')
-                        db.update_vhd_gc_status(root_node.id, 'Coalescing')
-                    ret = (node, db.get_vhd_by_id(node.parent_id))
+            parent_lock = cb.volumeTryLock(opq, __create_vhd_lock_name(node.parent_id))
+            if parent_lock:
+                node_lock = cb.volumeTryLock(opq, __create_vhd_lock_name(node.id))
+                if node_lock:
+                    parent = db.get_vhd_by_id(node.parent_id)
+                    ret = (VhdLock(node, node_lock), VhdLock(parent, parent_lock))
                     break
+                else:
+                    cb.volumeUnlock(opq, parent_lock)
     db.close()
     cb.volumeStopOperations(opq)
     return ret

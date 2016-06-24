@@ -23,13 +23,12 @@ class VDI(object):
         )
 
 class VHD(object):
-    def __init__(self, vhd_id, parent, snap, vsize, psize, gc_status=None):
+    def __init__(self, vhd_id, parent, snap, vsize, psize):
         self.id = vhd_id
         self.parent_id = parent
         self.snap = snap
         self.vsize = vsize
         self.psize = psize
-        self.gc_status = gc_status
 
     def is_child_of(self, vhd_2):
         # CALL VHD_UTIL
@@ -44,8 +43,7 @@ class VHD(object):
             row['parent_id'],
             row['snap'],
             row['vsize'],
-            row['psize'],
-            row['gc_status']
+            row['psize']
         )
 
 class VHDMetabase(object):
@@ -71,8 +69,7 @@ class VHDMetabase(object):
                     snap      INTEGER,
                     parent_id INTEGER,
                     vsize     INTEGER,
-                    psize     INTEGER,
-                    gc_status TEXT
+                    psize     INTEGER
                 )"""
             )
             self._conn.execute(
@@ -150,9 +147,6 @@ class VHDMetabase(object):
 
     def update_vhd_psize(self, vhd_id, psize):
         self.__update_vhd(vhd_id, "psize", psize)
-
-    def update_vhd_gc_status(self, vhd_id, gc_status):
-        self.__update_vhd(vhd_id, "gc_status", gc_status)
 
     def __update_vhd(self, vhd_id, key, value):
         res = self._conn.execute("""
