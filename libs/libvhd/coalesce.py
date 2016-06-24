@@ -7,13 +7,14 @@ import os
 import sys
 import time
 import errno
+import re
 
 from xapi.storage import log
 from xapi.storage.libs import poolhelper
 
-from .vhdutil import VHDUtil
-from .metabase import VHDMetabase
-from .lock import Lock
+from xapi.storage.libs.libvhd.vhdutil import VHDUtil
+from xapi.storage.libs.libvhd.metabase import VHDMetabase
+from xapi.storage.libs.libvhd.lock import Lock
 
 # Debug string
 GC = 'GC'
@@ -293,7 +294,9 @@ def run_coalesce(sr_type, uri):
 class VHDCoalesce(object):
     @staticmethod
     def start_gc(dbg, sr_type, uri):
-        args = [os.path.abspath(__file__), sr_type, uri]
+        # Get the command to run, need to replace pyc with py as __file__ will
+        # be the byte compiled file
+        args = [os.path.abspath(re.sub("pyc$", "py", __file__)), sr_type, uri]
         subprocess.Popen(args)
         log.debug("{}: Started GC sr_type={} uri={}".format(dbg, sr_type, uri))
 
