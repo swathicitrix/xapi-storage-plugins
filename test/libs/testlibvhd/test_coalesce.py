@@ -11,8 +11,12 @@ def test_context():
 
 class VHDCoalesceTest(unittest.TestCase):
 
+    # Tests for find non leaf coalesce
+
     @mock.patch('xapi.storage.libs.libvhd.coalesce.VHDMetabase')
-    def test_find_best_non_leaf_coalesce_no_results(self, mockMetabase):
+    @mock.patch('xapi.storage.libs.libvhd.coalesce.log')
+    @mock.patch('xapi.storage.libs.libvhd.coalesce.Lock')
+    def test_find_best_non_leaf_coalesce_no_results(self, mocklock, mocklog, mockMetabase):
         # Setup the mocks
         callbacks = mock.MagicMock()
         mockDB = mock.MagicMock()
@@ -33,7 +37,8 @@ class VHDCoalesceTest(unittest.TestCase):
 
     @mock.patch('xapi.storage.libs.libvhd.coalesce.VHDMetabase')
     @mock.patch('xapi.storage.libs.libvhd.coalesce.log')
-    def test_find_best_non_leaf_coalesce_success(self, mocklog, mockMetabase):
+    @mock.patch('xapi.storage.libs.libvhd.coalesce.Lock')
+    def test_find_best_non_leaf_coalesce_success(self, mocklock, mocklog, mockMetabase):
         # Setup the mocks
         callbacks = mock.MagicMock()
         mockDB = mock.MagicMock()
@@ -55,40 +60,33 @@ class VHDCoalesceTest(unittest.TestCase):
                 0,
                 10*1024,
                 10*1024
-                ),
-            VHD(
-                1,
-                None,
-                0,
-                10*1024,
-                10*1024
-                ),
-            VHD(
-                2,
-                1,
-                0,
-                10*1024,
-                10*1024
                 )
             ]
+        callbacks.volumeTryLock.side_effect = [ mock.MagicMock(), mock.MagicMock() ]
 
         # Call the method
         child, parent = coalesce.find_best_non_leaf_coalesceable_2("test-uri", callbacks)
 
         # Check the result
-        self.assertEquals(3, child.id)
-        self.assertEquals(2, parent.id)
+        self.assertEquals(3, child.vhd.id)
+        self.assertEquals(2, parent.vhd.id)
 
         # Check the calls
         callbacks.volumeStartOperations.assert_called_with("test-uri", 'w')
         callbacks.volumeStopOperations.assert_called()
+        callbacks.volumeTryLock.assert_has_calls(
+            [mock.call(mock.ANY, "vhd-2.lock"), mock.call(mock.ANY, "vhd-3.lock")], any_order=True)
+        self.assertEquals(2, callbacks.volumeTryLock.call_count)
+        callbacks.volumeUnlock.assert_not_called()
+        mockDB.update_vhd_gc_status.assert_not_called()
         mockDB.write_context.assert_called()
+        self.assertEquals(1, mockDB.get_vhd_by_id.call_count)
         mockDB.get_vhd_by_id.assert_called()
-        calls = [mock.call(3, "Coalescing"), mock.call(1, "Coalescing")]
-        mockDB.update_vhd_gc_status.assert_has_calls(calls)
 
     @mock.patch('xapi.storage.libs.libvhd.coalesce.VHDMetabase')
-    def test_find_best_non_leaf_coalesce_root_coalescing(self, mockMetabase):
+    @mock.patch('xapi.storage.libs.libvhd.coalesce.log')
+    @mock.patch('xapi.storage.libs.libvhd.coalesce.Lock')
+    def test_find_best_non_leaf_coalesce_parent_coalescing(self, mocklock, mocklog, mockMetabase):
         # Setup the mocks
         callbacks = mock.MagicMock()
         mockDB = mock.MagicMock()
@@ -103,23 +101,7 @@ class VHDCoalesceTest(unittest.TestCase):
                 10*1024
                 )
             ]
-        mockDB.get_vhd_by_id.side_effect = [
-            VHD(
-                2,
-                1,
-                0,
-                10*1024,
-                10*1024
-                ),
-            VHD(
-                1,
-                None,
-                0,
-                10*1024,
-                10*1024,
-                "Coalescing"
-                )
-            ]
+        callbacks.volumeTryLock.side_effect = [ None ]
 
         # Call the method
         child, parent = coalesce.find_best_non_leaf_coalesceable_2("test-uri", callbacks)
@@ -130,12 +112,16 @@ class VHDCoalesceTest(unittest.TestCase):
         # Check the calls
         callbacks.volumeStartOperations.assert_called_with("test-uri", 'w')
         callbacks.volumeStopOperations.assert_called()
+        callbacks.volumeTryLock.assert_has_call(mock.ANY, "vhd-2.lock")
+        self.assertEquals(1, callbacks.volumeTryLock.call_count)
+        callbacks.volumeUnlock.assert_not_called()
         mockDB.write_context.assert_not_called()
-        mockDB.get_vhd_by_id.assert_called()
         mockDB.update_vhd_gc_status.assert_not_called()
 
     @mock.patch('xapi.storage.libs.libvhd.coalesce.VHDMetabase')
-    def test_find_best_non_leaf_coalesce_node_coalescing(self, mockMetabase):
+    @mock.patch('xapi.storage.libs.libvhd.coalesce.log')
+    @mock.patch('xapi.storage.libs.libvhd.coalesce.Lock')
+    def test_find_best_non_leaf_coalesce_node_coalescing(self, mocklock, mocklog, mockMetabase):
         # Setup the mocks
         callbacks = mock.MagicMock()
         mockDB = mock.MagicMock()
@@ -147,8 +133,7 @@ class VHDCoalesceTest(unittest.TestCase):
                 2,
                 0,
                 10*1024,
-                10*1024,
-                "Coalescing"
+                10*1024
                 )
             ]
         mockDB.get_vhd_by_id.side_effect = [
@@ -159,6 +144,8 @@ class VHDCoalesceTest(unittest.TestCase):
                 10*1024,
                 10*1024)
             ]
+        parent_lock = mock.MagicMock()
+        callbacks.volumeTryLock.side_effect = [ parent_lock, None ]
 
         # Call the method
         child, parent = coalesce.find_best_non_leaf_coalesceable_2("test-uri", callbacks)
@@ -169,14 +156,19 @@ class VHDCoalesceTest(unittest.TestCase):
         # Check the calls
         callbacks.volumeStartOperations.assert_called_with("test-uri", 'w')
         callbacks.volumeStopOperations.assert_called()
+        callbacks.volumeTryLock.assert_has_calls(
+            [mock.call(mock.ANY, "vhd-2.lock"), mock.call(mock.ANY, "vhd-3.lock")], any_order=True)
+        self.assertEquals(2, callbacks.volumeTryLock.call_count)
+        callbacks.volumeUnlock.assert_has_call(mock.call(mock.ANY, parent_lock))
+        self.assertEquals(1, callbacks.volumeUnlock.call_count)
         mockDB.write_context.assert_not_called()
         mockDB.get_vhd_by_id.assert_not_called()
         mockDB.update_vhd_gc_status.assert_not_called()
 
-
     @mock.patch('xapi.storage.libs.libvhd.coalesce.VHDMetabase')
     @mock.patch('xapi.storage.libs.libvhd.coalesce.log')
-    def test_find_best_non_leaf_coalesce_one_coalescing_success(self, mocklog, mockMetabase):
+    @mock.patch('xapi.storage.libs.libvhd.coalesce.Lock')
+    def test_find_best_non_leaf_coalesce_one_coalescing_success(self, mocklock, mocklog, mockMetabase):
         # Setup the mocks
         callbacks = mock.MagicMock()
         mockDB = mock.MagicMock()
@@ -188,9 +180,7 @@ class VHDCoalesceTest(unittest.TestCase):
                 2,
                 0,
                 10*1024,
-                10*1024,
-                "Coalescing"
-                ),
+                10*1024),
             VHD(
                 5,
                 4,
@@ -206,66 +196,75 @@ class VHDCoalesceTest(unittest.TestCase):
                 0,
                 10*1024,
                 10*1024
-                ),
-            VHD(
-                1,
-                None,
-                0,
-                10*1024,
-                10*1024
-                ),
-            VHD(
-                4,
-                1,
-                0,
-                10*1024,
-                10*1024
                 )
             ]
+
+        parent_lock = mock.MagicMock()
+        callbacks.volumeTryLock.side_effect = [ parent_lock, None, mock.MagicMock(), mock.MagicMock() ]
 
         # Call the method
         child, parent = coalesce.find_best_non_leaf_coalesceable_2("test-uri", callbacks)
 
         # Check the result
-        self.assertEquals(5, child.id)
-        self.assertEquals(4, parent.id)
+        self.assertEquals(5, child.vhd.id)
+        self.assertEquals(4, parent.vhd.id)
 
         # Check the calls
         callbacks.volumeStartOperations.assert_called_with("test-uri", 'w')
         callbacks.volumeStopOperations.assert_called()
+        callbacks.volumeTryLock.assert_has_calls(
+            [
+                mock.call(mock.ANY, "vhd-2.lock"),
+                mock.call(mock.ANY, "vhd-3.lock"),
+                mock.call(mock.ANY, "vhd-5.lock"),
+                mock.call(mock.ANY, "vhd-4.lock"),
+                ],
+            any_order=True)
+        self.assertEquals(4, callbacks.volumeTryLock.call_count)
+        callbacks.volumeUnlock.assert_has_call(mock.call(mock.ANY, parent_lock))
+        self.assertEquals(1, callbacks.volumeUnlock.call_count)
         mockDB.write_context.assert_called()
         mockDB.get_vhd_by_id.assert_called()
-        calls = [mock.call(5, "Coalescing"), mock.call(1, "Coalescing")]
-        mockDB.update_vhd_gc_status.assert_has_calls(calls)
+        mockDB.update_vhd_gc_status.assert_not_called()
+
+    # Tests for non- leaf coalesce
 
     @mock.patch('xapi.storage.libs.libvhd.coalesce.VHDMetabase')
     @mock.patch('xapi.storage.libs.libvhd.coalesce.VHDUtil.set_parent')
     @mock.patch('xapi.storage.libs.libvhd.coalesce.VHDUtil.coalesce')
     @mock.patch('xapi.storage.libs.libvhd.coalesce.poolhelper')
     @mock.patch('xapi.storage.libs.libvhd.coalesce.log')
+    @mock.patch('xapi.storage.libs.libvhd.coalesce.Lock')
     def test_non_leaf_coalesce_success_non_active(
             self,
+            mocklock,
             mocklog,
             mockPoolHelper,
             mock_vhdutil_coalesce,
             mock_vhdutil_set_parent,
             mockMetabase):
         # Parameters for method in test
-        node = VHD(
+        node_lock = mock.MagicMock()
+        node = coalesce.VhdLock(
+            VHD(
                 3,
                 2,
                 0,
                 10*1024,
                 10*1024
-                )
+                ),
+            node_lock)
 
-        parent = VHD(
+        parent_lock = mock.MagicMock()
+        parent = coalesce.VhdLock(
+            VHD(
                 2,
                 1,
                 0,
                 10*1024,
                 10*1024
-                )
+                ),
+            parent_lock)
 
         # Setup some mocks
         callbacks = mock.MagicMock()
@@ -292,7 +291,7 @@ class VHDCoalesceTest(unittest.TestCase):
                     )
         mockDB.get_children.side_effect = [           
                 [leaf_vhd],
-            []
+                []
             ]
         # This is the VDI for the leaf VHD
         mockDB.get_vdi_for_vhd.return_value = VDI("1", "VDI1", "", None, None, leaf_vhd)
@@ -304,10 +303,15 @@ class VHDCoalesceTest(unittest.TestCase):
         callbacks.volumeStartOperations.assert_called_with("test-uri", 'w')
         callbacks.volumeStopOperations.assert_called()
         callbacks.volumeDestroy.assert_called()
+        callbacks.volumeUnlock.assert_has_calls(
+            [mock.call(mock.ANY, node_lock), mock.call(mock.ANY, parent_lock)],
+            any_order = True)
+        self.assertEquals(2, callbacks.volumeUnlock.call_count)
         mock_vhdutil_coalesce.assert_called()
         mock_vhdutil_set_parent.assert_called()
         mockDB.update_vhd_parent.assert_called_with(4, 2)
         mockDB.delete_vhd.assert_called_with(3)
+        mockDB.update_vhd_gc_status.assert_not_called()
         # Node wasn't active so no need to refresh the datapath
         mockPoolHelper.suspend_datapath_on_host.assert_not_called()
         mockPoolHelper.resume_datapath_on_host.assert_not_called()
@@ -317,30 +321,38 @@ class VHDCoalesceTest(unittest.TestCase):
     @mock.patch('xapi.storage.libs.libvhd.coalesce.VHDUtil.coalesce')
     @mock.patch('xapi.storage.libs.libvhd.coalesce.poolhelper')
     @mock.patch('xapi.storage.libs.libvhd.coalesce.log')
+    @mock.patch('xapi.storage.libs.libvhd.coalesce.Lock')
     def test_non_leaf_coalesce_success_active(
             self,
+            mocklock,
             mocklog,
             mockPoolHelper,
             mock_vhdutil_coalesce,
             mock_vhdutil_set_parent,
             mockMetabase):
         # Parameters for method in test
-        node = VHD(
+        node_lock = mock.MagicMock()
+        node = coalesce.VhdLock(
+            VHD(
                 3,
                 2,
                 0,
                 10*1024,
                 10*1024
-                )
+                ),
+            node_lock)
 
-        parent = VHD(
+        parent_lock = mock.MagicMock()
+        parent = coalesce.VhdLock(
+            VHD(
                 2,
                 1,
                 0,
                 10*1024,
                 10*1024
-                )
-
+                ),
+            parent_lock)
+        
         # Setup some mocks
         callbacks = mock.MagicMock()
         mockDB = mock.MagicMock()
@@ -366,9 +378,9 @@ class VHDCoalesceTest(unittest.TestCase):
                     )
         mockDB.get_children.side_effect = [           
                 [leaf_vhd],
-            []
+                []
             ]
-        # This is the VDI for the leaf VHD
+        # This is the VDI for the leaf VHD, active on Host1
         mockDB.get_vdi_for_vhd.return_value = VDI("1", "VDI1", "", "Host1", None, leaf_vhd)
 
         # Call the method
@@ -378,13 +390,20 @@ class VHDCoalesceTest(unittest.TestCase):
         callbacks.volumeStartOperations.assert_called_with("test-uri", 'w')
         callbacks.volumeStopOperations.assert_called()
         callbacks.volumeDestroy.assert_called()
+        callbacks.volumeUnlock.assert_has_calls(
+            [mock.call(mock.ANY, node_lock), mock.call(mock.ANY, parent_lock)],
+            any_order = True)
+        self.assertEquals(2, callbacks.volumeUnlock.call_count)
         mock_vhdutil_coalesce.assert_called()
         mock_vhdutil_set_parent.assert_called()
         mockDB.update_vhd_parent.assert_called_with(4, 2)
         mockDB.delete_vhd.assert_called_with(3)
+        mockDB.update_vhd_gc_status.assert_not_called()
         # Node was active so need to refresh the datapath on the correct host
         mockPoolHelper.suspend_datapath_on_host.assert_called_with("GC", "Host1", mock.ANY)
         mockPoolHelper.resume_datapath_on_host.assert_called_with("GC", "Host1", mock.ANY)
+
+    # Tests for garbage clean up
 
     @mock.patch('xapi.storage.libs.libvhd.coalesce.VHDMetabase')
     def test_remove_garbage_vhds_none(self, mockMetabase):

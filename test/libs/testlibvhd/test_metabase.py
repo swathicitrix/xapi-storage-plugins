@@ -113,23 +113,6 @@ class VHDMetabaseTest(unittest.TestCase):
 
         self.assertEquals(25*1024, vhd.vsize)
 
-    def test_update_vhd_gc_status_success(self):
-        self.subject.populate_test_set_1()
-        vhd = self.subject.get_vhd_by_id(1)
-
-        self.assertEquals(None, vhd.gc_status)        
-
-        self.subject.update_vhd_gc_status(1, "Coalescing")
-        vhd = self.subject.get_vhd_by_id(1)
-
-        self.assertEquals("Coalescing", vhd.gc_status)
-
-        # ANd clear it again
-        self.subject.update_vhd_gc_status(1, None)
-        vhd = self.subject.get_vhd_by_id(1)
-
-        self.assertEquals(None, vhd.gc_status)
-
     def test_update_vdi_name_success(self):
         self.subject.populate_test_set_1()
         self.subject.update_vdi_name(1, "FirstRenamedVDI");
