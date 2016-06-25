@@ -95,6 +95,6 @@ class Callbacks():
             fcntl.flock(lock, fcntl.LOCK_EX| fcntl.LOCK_NB)
             return lock
         except IOError, e:
-            if e.errno in [errno.EACCESS, errno.EAGAIN]:
+            if e.errno in [errno.EACCES, errno.EAGAIN]:
                 return None
             raise
