@@ -1,22 +1,18 @@
-import uuid
-import sqlite3
-import os, sys
+import os
 import time
 import urlparse
 import stat
 from xapi.storage.common import call
 from xapi.storage import log
-import xapi.storage.libs.poolhelper
 import xcp.environ
 import XenAPI
-import socket
 import scsiutil
-import fcntl
 from xapi.storage.libs import util
 
 DEFAULT_PORT = 3260
 ISCSI_REFDIR = '/var/run/sr-ref'
 DEV_PATH_ROOT = '/dev/disk/by-id/scsi-'
+ISCSIADM_BIN = '/usr/sbin/iscsiadm'
 
 def queryLUN(dbg, path, id):
     vendor = scsiutil.getmanufacturer(dbg, path)
@@ -97,21 +93,43 @@ def discoverIQN(dbg, keys, interfaceArray=["default"]):
 
 
 def set_chap_settings(dbg, portal, target, username, password):
-    cmd = ["/usr/sbin/iscsiadm", "-m", "node", "-T", iqn, "--portal", 
-           portal, "--op", "update", "-n", "node.session.auth.authmethod", 
-           "-v", "CHAP"]
+    cmd = [
+        ISCSIADM_BIN,
+        '-m', 'node',
+        '-T', iqn,
+        '--portal', portal,
+        '--op', 'update',
+        '-n', 'node.session.auth.authmethod',
+        '-v', 'CHAP'
+    ]
     output = call(dbg, cmd)
-    log.debug("%s: output = %s" % (dbg, output))
-    cmd = ["/usr/sbin/iscsiadm", "-m", "node", "-T", iqn, "--portal", 
-           portal, "--op", "update", "-n", "node.session.auth.username", 
-           "-v", username]
+    log.debug("{}: output = {}".format(dbg, output))
+
+    cmd = [
+        ISCSIADM_BIN,
+        "-m", "node",
+        "-T", iqn,
+        "--portal", portal,
+        "--op", "update",
+        "-n", "node.session.auth.username",
+        "-v", username
+    ]
     output = call(dbg, cmd)
-    log.debug("%s: output = %s" % (dbg, output))
-    cmd = ["/usr/sbin/iscsiadm", "-m", "node", "-T", iqn, "--portal", 
-           portal, "--op", "update", "-n", "node.session.auth.password", 
-           "-v", password]
+    log.debug("{}: output = {}".format(dbg, output))
+
+    cmd = [
+        ISCSIADM_BIN,
+        "-m", "node",
+        "-T", iqn,
+        "--portal", portal,
+        "--op",
+        "update",
+        "-n",
+        "node.session.auth.password",
+        "-v", password]
     output = call(dbg, cmd)
-    log.debug("%s: output = %s" % (dbg, output))
+    log.debug("{}: output = {}".format(dbg, output))
+
 
 
 def get_device_path(dbg, uri):
