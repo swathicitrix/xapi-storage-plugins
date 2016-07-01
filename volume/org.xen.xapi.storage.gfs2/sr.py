@@ -26,38 +26,6 @@ import time
 # For a block device /a/b/c, we will mount it at <mountpoint_root>/a/b/c
 mountpoint_root = "/var/run/sr-mount/"
 DLM_REFDIR = "/var/run/sr-ref"
-VG_FREE_SPACE_THRESHOLD = 0
-
-def vg_stats(dbg, vg_name):
-    try:
-        cmd = ["/usr/sbin/vgs", "--noheadings", "--nosuffix", "--units", "b", vg_name]
-        output = call(dbg, cmd);
-        stats = {}
-        text = output.split()
-        size = long(text[5])
-        freespace = long(text[6])
-        utilisation = size - freespace
-        stats['physical_size'] = size
-        stats['physical_utilisation'] = utilisation
-        stats['freespace'] = freespace
-
-    except Exception,e:
-        log.debug("Error in getting vg stats %s, vgs output: %s" %(str(e), output));
-    finally:
-        return stats
-
-def getPVName(dbg, sr):
-    try:
-        uri = getFromSRMetadata(dbg, sr, 'uri')
-        dev_path = blkinfo.get_device_path(dbg, uri)
-        cmd = ["readlink", "-f", dev_path]
-        output = call(dbg, cmd)
-        return output.rstrip()
-    except Exception,e:
-        log.debug("Exception raised in getting PV name: %s" %str(e))
-
-def getVGName(dbg, sr):
-    return getFromSRMetadata(dbg, sr, "unique_id")
 
 def getSRMountPath(dbg, dev_path, check=True):
     mnt_path = os.path.abspath(mountpoint_root + dev_path)
@@ -545,61 +513,7 @@ class Implementation(xapi.storage.api.volume.SR_skeleton):
         unplug_device(dbg, uri)
 
     def ls(self, dbg, sr):
-        pv_name = getPVName(dbg,sr)
-        vg_name = getVGName(dbg,sr)
-        lv_name = "/dev/" + vg_name +"/gfs2"
-
-        try:
-            # refresh iscsi connection to reflect LUN's new size
-            call(dbg, ["/usr/sbin/iscsiadm", "-m", "node", "-R"])
-
-            # Does not matter if LUN is resized or not, go ahead and resize pv,
-            # incase if LUN is resized pv size will get updated
-            call(dbg, ["/usr/sbin/pvresize" , pv_name, "--config", "global{metadata_read_only=0}"])
-
-            # if pv was expanded, this will reflect as freespace
-            # in the associated volume group, only then we need to expand gfs2 lv
-
-            stats = vg_stats(dbg,vg_name)
-            if stats['freespace'] > VG_FREE_SPACE_THRESHOLD:
-                log.debug("Free space (%s) detected in VG, expanding gfs2 LV." %str(stats['freespace']))
-                opq = urlparse.urlparse(sr).path
-                try:
-                    gl = os.path.join(opq, "gl")
-                    f = util.lock_file(dbg, gl, "w+")
-                    # extend lv
-                    call(dbg, ["lvextend", "-l+100%FREE", lv_name, "--config", "global{metadata_read_only=0}"])
-
-                    #inform other node about LUN resize
-                    inventory = xcp.environ.readInventory()
-                    session = XenAPI.xapi_local()
-                    session.xenapi.login_with_password("root", "")
-                    this_host = session.xenapi.host.get_by_uuid(
-                        inventory.get("INSTALLATION_UUID"))
-
-                    for host in session.xenapi.host.get_all():
-                        if host != this_host:
-                            log.debug("%s: setup host %s" % (dbg, session.xenapi.host.get_name_label(host)))
-                            session.xenapi.host.call_plugin(
-                                host, "gfs2setup", "refreshDM", {'lv_name': lv_name, 'pv_dev': pv_name.split('/')[2]})
-
-                    # grow gfs2
-                    call(dbg, ["gfs2_grow", mountpoint_root + "dev/" + vg_name +"/gfs2"])
-
-                except Exception, e:
-                    raise e
-
-                finally:
-                    if f:
-                        util.unlock_file(dbg,f)
-            else:
-                log.debug("No free space detected in VG")
-
-        except Exception, e:
-                log.debug("Exception in SR.ls: %s" %str(e))
-
-        finally:
-            return VHDVolume.ls(dbg, sr, gfs2.Callbacks())
+        return VHDVolume.ls(dbg, sr, gfs2.Callbacks())
 
     def stat(self, dbg, sr):
         # SR path (sr) is file://<mnt_path>
