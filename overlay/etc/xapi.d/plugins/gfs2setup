@@ -148,7 +148,14 @@ def gfs2Test(session, args):
         return True
     return False
 
+def refreshDM(session, args):
+    call(["/usr/sbin/iscsiadm", "-m", "node", "-R"])
+    with open("/sys/block/" + args['pv_dev']+ "/device/rescan", "w") as text_file:
+        text_file.write("{0}".format(1))
+    call(["lvchange", "--refresh", args['lv_name']])
+    return ""
+
 if __name__ == "__main__":
     XenAPIPlugin.dispatch({
         "gfs2UpdateConf": gfs2UpdateConf,
-        "gfs2Reload": gfs2Reload})
+        "gfs2Reload": gfs2Reload, "refreshDM": refreshDM})
