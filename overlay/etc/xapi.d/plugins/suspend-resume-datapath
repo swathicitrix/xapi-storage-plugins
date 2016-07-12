@@ -53,8 +53,9 @@ def refresh_datapath(session, args):
         log.debug("%s: found a tapdisk to refresh: %s" % (dbg, tap))
         tap.pause(dbg)
         tap.unpause(dbg, image.Vhd(args['new_path']))
-        tapdisk.save_tapdisk_metadata(dbg, args['new_path'], tap)
-        tapdisk.forget_tapdisk_metadata(dbg, args['path'])
+        if (args['path'] != args['new_path']):
+            tapdisk.forget_tapdisk_metadata(dbg, args['path'])
+            tapdisk.save_tapdisk_metadata(dbg, args['new_path'], tap)
     log.debug("%s: refresh_datapath returning True" % (dbg))
     return "True"
     
