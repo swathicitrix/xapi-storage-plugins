@@ -280,3 +280,61 @@ class VHDMetabaseTest(unittest.TestCase):
         vhds = self.subject.get_garbage_vhds()
 
         self.assertEquals(1, len(vhds))
+
+    def test_add_and_remove_journal_entries_success(self):
+        self.subject.populate_test_set_2()
+
+        child1 = self.subject.get_vhd_by_id(6)
+        child2 = self.subject.get_vhd_by_id(7)
+
+        journal_results = []
+
+        with self.subject.write_context():
+            journal_results = self.subject.add_journal_entries(4, 2, [child1, child2])
+
+        journal_entries = self.subject.get_journal_entries()
+
+        self.assertEquals(2, len(journal_results))
+        self.assertEquals(2, len(journal_entries))
+
+        with self.subject.write_context():
+            self.subject.remove_journal_entry(6)
+
+        journal_entries = self.subject.get_journal_entries()
+
+        self.assertEquals(1, len(journal_entries))
+
+        with self.subject.write_context():
+            self.subject.remove_journal_entry(7)
+
+        journal_entries = self.subject.get_journal_entries()
+
+        self.assertEquals(0, len(journal_entries))
+
+    def test_add_and_remove_refresh_entries_success(self):
+        self.subject.populate_test_set_2()
+
+        child1 = self.subject.get_vhd_by_id(6)
+        child2 = self.subject.get_vhd_by_id(7)
+
+        refresh_results = []
+
+        with self.subject.write_context():
+            refresh_results = self.subject.add_refresh_entries(2, [child1, child2])
+
+        refresh_entries = self.subject.get_refresh_entries()
+
+        self.assertEquals(2, len(refresh_results))
+        self.assertEquals(2, len(refresh_entries))
+
+        with self.subject.write_context():
+            self.subject.remove_refresh_entry(6)
+
+        refresh_entries = self.subject.get_refresh_entries()
+        self.assertEquals(1, len(refresh_entries))
+
+        with self.subject.write_context():
+            self.subject.remove_refresh_entry(7)
+
+        refresh_entries = self.subject.get_refresh_entries()
+        self.assertEquals(0, len(refresh_entries))
