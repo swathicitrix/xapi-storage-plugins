@@ -46,6 +46,32 @@ class VHD(object):
             row['psize']
         )
 
+class Journal(object):
+    def __init__(self, id, parent_id, new_parent_id):
+        self.id = id
+        self.parent_id = parent_id
+        self.new_parent_id = new_parent_id
+
+    @classmethod
+    def from_row(cls, row):
+        return cls(
+            row['id'],
+            row['parent_id'],
+            row['new_parent_id']
+            )
+
+class Refresh(object):
+    def __init__(self, parent_id, leaf_id):
+        self.leaf_id = leaf_id
+        self.parent_id = parent_id
+
+    @classmethod
+    def from_row(cls, row):
+        return cls(
+            row['id'],
+            row['leaf_id']
+            )
+
 class VHDMetabase(object):
 
     def __init__(self, path):
@@ -88,6 +114,24 @@ class VHDMetabase(object):
             )
             self._conn.execute(
                 "CREATE INDEX vdi_vhd_id ON vdi(vhd_id)"
+            )
+            self._conn.execute("""
+                CREATE TABLE journal(
+                    id            INTEGER NOT NULL,
+                    parent_id     INTEGER NOT NULL,
+                    new_parent_id INTEGER NOT NULL,
+                    FOREIGN KEY(id) REFERENCES vhd(id),
+                    FOREIGN KEY(parent_id) REFERENCES vhd(id),
+                    FOREIGN KEY(new_parent_id) REFERENCES vhd(id)
+                 )"""
+            )
+            self._conn.execute("""
+                 CREATE TABLE refresh(
+                     id         INTEGER NOT NULL,
+                     leaf_id    INTEGER NOT NULL,
+                     FOREIGN KEY(id) REFERENCES vhd(id),
+                     FOREIGN KEY(leaf_id) REFERENCES vhd(id)
+                 )"""
             )
 
     def insert_vdi(self, name, description, uuid, vhd_id):
@@ -309,6 +353,75 @@ class VHDMetabase(object):
             vhds.append(VHD.from_row(row))
 
         return vhds
+
+    def add_journal_entries(self, parent_id, new_parent_id, children):
+        """ Add journal entries for post-coalesce reparenting.
+        
+        Keyword arguments:
+        parent_id     -- the current parent of the children
+        new_parent_id -- the new parent for the children
+        children      -- list of VHD objects to be re-parented
+        Keyword return:
+        A list of Journal objects, one for each child in children
+        """
+        entries = []
+        for child in children:
+            self._conn.execute("""
+                INSERT INTO journal(id, parent_id, new_parent_id)
+                VALUES(:id, :parent_id, :new_parent_id)""",
+                               {"id": child.id,
+                                "parent_id": parent_id,
+                                "new_parent_id": new_parent_id}
+                               )
+            entries.append(Journal(child.id, parent_id, new_parent_id))
+
+        return entries
+
+    def get_journal_entries(self):
+        res = self._conn.execute("SELECT * from journal")
+
+        journal_entries = []
+        for row in res:
+            journal_entries.append(Journal.from_row(row))
+
+        return journal_entries
+
+    def remove_journal_entry(self, id):
+        self._conn.execute("""
+            DELETE FROM journal WHERE id=:id""",
+                           {"id": id})
+
+    def add_refresh_entries(self, vhd_id, leaves):
+        """ Add refresh entries for post-reparenting refresh
+
+        Keyword arguments:
+        vhd_id -- the vhd that has been reparented 
+        leaves -- the leaves that need to be refreshed
+        Keyword return:
+        A list of Refresh  objects, one for each leaf in leaves
+        """
+        entries = []
+        for leaf in leaves:
+            self._conn.execute("""
+                INSERT INTO refresh(id, leaf_id)
+                VALUES(:id, :leaf_id)""",
+                               {"id": vhd_id,
+                                "leaf_id": leaf.id}
+                               )
+            entries.append(Refresh(vhd_id, leaf.id))
+        return entries
+
+    def get_refresh_entries(self):
+        res = self._conn.execute("SELECT * FROM refresh")
+        refresh_entries = []
+        for row in res:
+            refresh_entries.append(Refresh.from_row(row))
+        return refresh_entries
+
+    def remove_refresh_entry(self, leaf_id):
+        self._conn.execute("""
+            DELETE FROM refresh WHERE leaf_id=:leaf_id""",
+                           {'leaf_id': leaf_id})
 
     @contextmanager
     def write_context(self):
