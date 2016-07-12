@@ -2,7 +2,7 @@ import mock
 import unittest
 from contextlib import contextmanager
 
-from xapi.storage.libs.libvhd.metabase import VDI, VHD
+from xapi.storage.libs.libvhd.metabase import VDI, VHD, Refresh, Journal
 from xapi.storage.libs.libvhd import coalesce
 
 @contextmanager
@@ -227,7 +227,7 @@ class VHDCoalesceTest(unittest.TestCase):
         mockDB.get_vhd_by_id.assert_called()
         mockDB.update_vhd_gc_status.assert_not_called()
 
-    # Tests for non- leaf coalesce
+    # Tests for non-leaf coalesce
 
     @mock.patch('xapi.storage.libs.libvhd.coalesce.VHDMetabase')
     @mock.patch('xapi.storage.libs.libvhd.coalesce.VHDUtil.set_parent')
@@ -271,16 +271,6 @@ class VHDCoalesceTest(unittest.TestCase):
         mockDB = mock.MagicMock()
         mockMetabase.return_value = mockDB
         mockDB.write_context.side_effect = test_context
-        # This is the rot node of the tree
-        mockDB.get_vhd_by_id.side_effect = [
-            VHD(
-                1,
-                None,
-                0,
-                10*1024,
-                10*1024
-                )
-            ]
         # This is the leaf VHD
         leaf_vhd = VHD(
                     4,
@@ -289,12 +279,21 @@ class VHDCoalesceTest(unittest.TestCase):
                     10*1024,
                     10*1024
                     )
-        mockDB.get_children.side_effect = [           
+        mockDB.get_children.side_effect = [
                 [leaf_vhd],
                 []
             ]
+        mockDB.get_vhd_by_id.side_effect = [leaf_vhd]
+
         # This is the VDI for the leaf VHD
         mockDB.get_vdi_for_vhd.return_value = VDI("1", "VDI1", "", None, None, leaf_vhd)
+
+        mockDB.add_refresh_entries.side_effect =  [
+            [ Refresh(4, 4) ]
+            ]
+        mockDB.add_journal_entries.side_effect = [
+            [ Journal(4, 3, 2) ]
+            ]
 
         # Call the method
         coalesce.non_leaf_coalesce(node, parent, "test-uri", callbacks)
@@ -312,9 +311,20 @@ class VHDCoalesceTest(unittest.TestCase):
         mockDB.update_vhd_parent.assert_called_with(4, 2)
         mockDB.delete_vhd.assert_called_with(3)
         mockDB.update_vhd_gc_status.assert_not_called()
+        mockDB.get_vhd_by_id.assert_has_calls([mock.call(4)])
+        self.assertEquals(1, mockDB.get_vhd_by_id.call_count)
+        mockDB.add_journal_entries.assert_has_calls([mock.call(3, 2, [leaf_vhd])])
+        self.assertEquals(1, mockDB.add_journal_entries.call_count)
+        mockDB.add_refresh_entries.assert_has_calls([mock.call(4, [leaf_vhd])])
+        self.assertEquals(1, mockDB.add_refresh_entries.call_count)
+        mockDB.remove_journal_entry.assert_has_calls([mock.call(4)])
+        self.assertEquals(1, mockDB.remove_journal_entry.call_count)
+        mockDB.remove_refresh_entry.assert_has_calls([mock.call(4)])
+        self.assertEquals(1, mockDB.remove_refresh_entry.call_count)
         # Node wasn't active so no need to refresh the datapath
         mockPoolHelper.suspend_datapath_on_host.assert_not_called()
         mockPoolHelper.resume_datapath_on_host.assert_not_called()
+        mockPoolHelper.refresh_datapath_on_host.assert_not_called()
 
     @mock.patch('xapi.storage.libs.libvhd.coalesce.VHDMetabase')
     @mock.patch('xapi.storage.libs.libvhd.coalesce.VHDUtil.set_parent')
@@ -358,16 +368,6 @@ class VHDCoalesceTest(unittest.TestCase):
         mockDB = mock.MagicMock()
         mockMetabase.return_value = mockDB
         mockDB.write_context.side_effect = test_context
-        # This is the root node of the tree
-        mockDB.get_vhd_by_id.side_effect = [
-            VHD(
-                1,
-                None,
-                0,
-                10*1024,
-                10*1024
-                )
-            ]
         # This is the leaf VHD
         leaf_vhd = VHD(
                     4,
@@ -380,8 +380,17 @@ class VHDCoalesceTest(unittest.TestCase):
                 [leaf_vhd],
                 []
             ]
+        mockDB.get_vhd_by_id.side_effect = [leaf_vhd]
+
         # This is the VDI for the leaf VHD, active on Host1
         mockDB.get_vdi_for_vhd.return_value = VDI("1", "VDI1", "", "Host1", None, leaf_vhd)
+
+        mockDB.add_refresh_entries.side_effect =  [
+            [ Refresh(4, 4) ]
+            ]
+        mockDB.add_journal_entries.side_effect = [
+            [ Journal(4, 3, 2) ]
+            ]
 
         # Call the method
         coalesce.non_leaf_coalesce(node, parent, "test-uri", callbacks)
@@ -399,9 +408,20 @@ class VHDCoalesceTest(unittest.TestCase):
         mockDB.update_vhd_parent.assert_called_with(4, 2)
         mockDB.delete_vhd.assert_called_with(3)
         mockDB.update_vhd_gc_status.assert_not_called()
+        mockDB.get_vhd_by_id.assert_has_calls([mock.call(4)])
+        self.assertEquals(1, mockDB.get_vhd_by_id.call_count)
+        mockDB.add_journal_entries.assert_has_calls([mock.call(3, 2, [leaf_vhd])])
+        self.assertEquals(1, mockDB.add_journal_entries.call_count)
+        mockDB.add_refresh_entries.assert_has_calls([mock.call(4, [leaf_vhd])])
+        self.assertEquals(1, mockDB.add_refresh_entries.call_count)
+        mockDB.remove_journal_entry.assert_has_calls([mock.call(4)])
+        self.assertEquals(1, mockDB.remove_journal_entry.call_count)
+        mockDB.remove_refresh_entry.assert_has_calls([mock.call(4)])
+        self.assertEquals(1, mockDB.remove_refresh_entry.call_count)
         # Node was active so need to refresh the datapath on the correct host
-        mockPoolHelper.suspend_datapath_on_host.assert_called_with("GC", "Host1", mock.ANY)
-        mockPoolHelper.resume_datapath_on_host.assert_called_with("GC", "Host1", mock.ANY)
+        mockPoolHelper.suspend_datapath_on_host.assert_not_called()
+        mockPoolHelper.resume_datapath_on_host.assert_not_called()
+        mockPoolHelper.refresh_datapath_on_host.assert_called_with("GC", "Host1", mock.ANY, mock.ANY)
 
     # Tests for garbage clean up
 

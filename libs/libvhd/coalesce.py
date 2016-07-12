@@ -66,22 +66,16 @@ def find_leaves(vhd, db, leaf_accumulator):
     children = db.get_children(vhd.id)
     if len(children) == 0:
         # This is a leaf add it to list
-        leaf_accumulator.append(db.get_vdi_for_vhd(vhd.id))
+        leaf_accumulator.append(vhd)
     else:
         for child in children:
             find_leaves(child, db, leaf_accumulator)
 
-def tap_ctl_pause(node, cb, opq):
+def tap_ctl_refresh(node, cb, opq):
     if node.active_on:
         node_path = cb.volumeGetPath(opq, str(node.vhd.id))
         log.debug("VHD {} active on {}".format(node.vhd.id, node.active_on))
-        poolhelper.suspend_datapath_on_host(GC, node.active_on, node_path)
-
-def tap_ctl_unpause(node, cb, opq):
-    if node.active_on:
-        node_path = cb.volumeGetPath(opq, str(node.vhd.id))
-        log.debug("VHD {} active on {}".format(node.vhd.id, node.active_on))
-        poolhelper.resume_datapath_on_host(GC, node.active_on, node_path)
+        poolhelper.refresh_datapath_on_host(GC, node.active_on, node_path, node_path)
 
 # def leaf_coalesce_snapshot(key, conn, cb, opq):
 #     log.debug("leaf_coalesce_snapshot key=%s" % key)
@@ -118,8 +112,6 @@ def non_leaf_coalesce(node, parent, uri, cb):
     meta_path = cb.volumeMetadataGetPath(opq)
 
     node_path = cb.volumeGetPath(opq, str(node_vhd.id))
-    parent_path = cb.volumeGetPath(opq, str(parent_vhd.id))
-
     log.debug("Running vhd-coalesce on {}".format(node_vhd.id))
     VHDUtil.coalesce(GC, node_path)
 
@@ -128,32 +120,35 @@ def non_leaf_coalesce(node, parent, uri, cb):
         # reparent all of the children to this node's parent
         children = db.get_children(node_vhd.id)
 
+        journal_entries = db.add_journal_entries(node_vhd.id, parent_vhd.id, children)
+
         # log.debug("List of children: %s" % children)
-        for child in children:
+        for child in journal_entries:
             child_path = cb.volumeGetPath(opq, str(child.id))
 
-            # pause all leaves having child as an ancestor
+            # Find all leaves having child as an ancestor
             leaves = []
-            find_leaves(child, db, leaves)
-            log.debug(
-                ("Children of {}: pausing all "
-                 "leaves: {}").format(child.id, len(leaves))
-            )
-            for leaf in leaves:
-                tap_ctl_pause(leaf, cb, opq)
+            find_leaves(db.get_vhd_by_id(child.id), db, leaves)
+
+            # Add leaves to database
+            leaves_to_refresh = db.add_refresh_entries(child.id, leaves)
 
             # reparent child to grandparent
-            log.debug("Reparenting {} to {}".format(child.id, parent_vhd.id))
+            log.debug("Reparenting {} to {}".format(child.id, child.new_parent_id))
             with db.write_context():
-                db.update_vhd_parent(child.id, parent_vhd.id)
-                VHDUtil.set_parent(GC, child_path, parent_path)
+                db.update_vhd_parent(child.id, child.new_parent_id)
+                new_parent_path = cb.volumeGetPath(opq, str(child.new_parent_id))
+                VHDUtil.set_parent(GC, child_path, new_parent_path)
+                db.remove_journal_entry(child.id)
 
-            # unpause all leaves having child as an ancestor
+            # Refresh all leaves having child as an ancestor
             log.debug(
-                ("Children {}: unpausing all "
-                 "leaves: {}").format(child.id, leaves))
-            for leaf in leaves:
-                tap_ctl_unpause(leaf, cb, opq)
+                ("Children {}: refreshing all "
+                 "leaves: {}").format(child.id, leaves_to_refresh))
+            for leaf in leaves_to_refresh:
+                with db.write_context():
+                    tap_ctl_refresh(db.get_vdi_for_vhd(leaf.leaf_id), cb, opq)
+                    db.remove_refresh_entry(leaf.leaf_id)
 
         # remove key
         log.debug("Destroy {}".format(node_vhd.id))
