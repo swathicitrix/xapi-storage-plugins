@@ -40,12 +40,16 @@ class Implementation(xapi.storage.api.plugin.Plugin_skeleton):
             "required_cluster_stack": ['corosync']}
 
 if __name__ == "__main__":
-    log.log_call_argv()
-    cmd = xapi.storage.api.plugin.Plugin_commandline(Implementation())
-    base = os.path.basename(sys.argv[0])
-    if base == 'Plugin.diagnostics':
-        cmd.diagnostics()
-    elif base == 'Plugin.Query':
-        cmd.query()
-    else:
-        raise xapi.storage.api.plugin.Unimplemented(base)
+    try:
+        log.log_call_argv()
+        cmd = xapi.storage.api.plugin.Plugin_commandline(Implementation())
+        base = os.path.basename(sys.argv[0])
+        if base == 'Plugin.diagnostics':
+            cmd.diagnostics()
+        elif base == 'Plugin.Query':
+            cmd.query()
+        else:
+            raise xapi.storage.api.plugin.Unimplemented(base)
+    except:
+        log.error("gfs2 volume plugin: error {}".format(sys.exc_info()))
+        raise

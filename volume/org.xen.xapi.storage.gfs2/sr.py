@@ -633,22 +633,26 @@ class Implementation(xapi.storage.api.volume.SR_skeleton):
 
 
 if __name__ == "__main__":
-    log.log_call_argv()
-    cmd = xapi.storage.api.volume.SR_commandline(Implementation())
-    base = os.path.basename(sys.argv[0])
-    if base == 'SR.probe':
-        cmd.probe()
-    elif base == 'SR.attach':
-        cmd.attach()
-    elif base == 'SR.create':
-        cmd.create()
-    elif base == 'SR.destroy':
-        cmd.destroy()
-    elif base == 'SR.detach':
-        cmd.detach()
-    elif base == 'SR.ls':
-        cmd.ls()
-    elif base == 'SR.stat':
-        cmd.stat()
-    else:
-        raise xapi.storage.api.volume.Unimplemented(base)
+    try:
+        log.log_call_argv()
+        cmd = xapi.storage.api.volume.SR_commandline(Implementation())
+        base = os.path.basename(sys.argv[0])
+        if base == 'SR.probe':
+            cmd.probe()
+        elif base == 'SR.attach':
+            cmd.attach()
+        elif base == 'SR.create':
+            cmd.create()
+        elif base == 'SR.destroy':
+            cmd.destroy()
+        elif base == 'SR.detach':
+            cmd.detach()
+        elif base == 'SR.ls':
+            cmd.ls()
+        elif base == 'SR.stat':
+            cmd.stat()
+        else:
+            raise xapi.storage.api.volume.Unimplemented(base)
+    except:
+        log.error("gfs2 sr: error {}".format(sys.exc_info()))
+        raise

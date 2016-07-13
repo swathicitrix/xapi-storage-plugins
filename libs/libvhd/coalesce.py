@@ -322,6 +322,9 @@ class VHDCoalesce(object):
                 time.sleep(1)
 
 if __name__ == '__main__':
-    sr_type = sys.argv[1]
-    uri = sys.argv[2]
-    run_coalesce(sr_type, uri)
+    try:
+        sr_type = sys.argv[1]
+        uri = sys.argv[2]
+        run_coalesce(sr_type, uri)
+    except:
+        log.error("libvhd:coalesce: error {}".format(sys.exc_info()))

@@ -28,10 +28,14 @@ class Implementation(xapi.storage.api.plugin.Plugin_skeleton):
             "required_cluster_stack": []}
 
 if __name__ == "__main__":
-    log.log_call_argv()
-    cmd = xapi.storage.api.plugin.Plugin_commandline(Implementation())
-    base = os.path.basename(sys.argv[0])
-    if base == "Plugin.Query":
-        cmd.query()
-    else:
-        raise xapi.storage.api.plugin.Unimplemented(base)
+    try:
+        log.log_call_argv()
+        cmd = xapi.storage.api.plugin.Plugin_commandline(Implementation())
+        base = os.path.basename(sys.argv[0])
+        if base == "Plugin.Query":
+            cmd.query()
+        else:
+            raise xapi.storage.api.plugin.Unimplemented(base)
+    except:
+        log.error("plugin:vhd+tapdisk: error {}".format(sys.exc_info()))
+        raise

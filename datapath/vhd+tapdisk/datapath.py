@@ -47,20 +47,24 @@ class Implementation(xapi.storage.api.datapath.Datapath_skeleton):
         return None
 
 if __name__ == "__main__":
-    log.log_call_argv()
-    cmd = xapi.storage.api.datapath.Datapath_commandline(Implementation())
-    base = os.path.basename(sys.argv[0])
-    if base == "Datapath.activate":
-        cmd.activate()
-    elif base == "Datapath.attach":
-        cmd.attach()
-    elif base == "Datapath.close":
-        cmd.close()
-    elif base == "Datapath.deactivate":
-        cmd.deactivate()
-    elif base == "Datapath.detach":
-        cmd.detach()
-    elif base == "Datapath.open":
-        cmd.open()
-    else:
-        raise xapi.storage.api.datapath.Unimplemented(base)
+    try:
+        log.log_call_argv()
+        cmd = xapi.storage.api.datapath.Datapath_commandline(Implementation())
+        base = os.path.basename(sys.argv[0])
+        if base == "Datapath.activate":
+            cmd.activate()
+        elif base == "Datapath.attach":
+            cmd.attach()
+        elif base == "Datapath.close":
+            cmd.close()
+        elif base == "Datapath.deactivate":
+            cmd.deactivate()
+        elif base == "Datapath.detach":
+            cmd.detach()
+        elif base == "Datapath.open":
+            cmd.open()
+        else:
+            raise xapi.storage.api.datapath.Unimplemented(base)
+    except:
+        log.error("datapath:vhd+tapdisk: error {}".format(sys.exc_info()))
+        raise
