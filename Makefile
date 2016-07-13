@@ -88,7 +88,7 @@ install-recipe = $(if $(call is-executable,$<),$(INSTALL_BIN),$(INSTALL_DATA))
 # e.g.: @SR.create@SR.destroy@SR.attach->volume/org.xen.xapi.storage.gfs2/sr.py
 #
 # $(REGEX) matches:
-# - exactly 4 spaces
+# - at least 4 spaces
 # - 'if' or 'elif' (capturing group 1)
 # - 1 or more spaces
 # - 'base'
@@ -103,7 +103,7 @@ install-recipe = $(if $(call is-executable,$<),$(INSTALL_BIN),$(INSTALL_DATA))
 # Finally, all matches in the file are concatenated
 # and '-><path_to_file>' is appended.
 #   - $(1): <path_to_file>
-REGEX := "s/ {4}(if|elif) +base *== *['\"](.*)['\"]:/@\2/p"
+REGEX := "s/ {4,}(if|elif) +base *== *['\"](.*)['\"]:/@\2/p"
 construct-decorated-rule = $(shell sed -nr $(REGEX) $(1) | tr -d '\n')->$(1)
 
 # Returns the 1st path item name
